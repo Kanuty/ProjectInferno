@@ -1,0 +1,22 @@
+{
+  "name": "@project-inferno/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "dev": "tsc && node --watch dist/index.js"
+  },
+  "dependencies": {
+    "@project-inferno/contracts": "workspace:*",
+    "@project-inferno/database": "workspace:*",
+    "@project-inferno/game-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}
