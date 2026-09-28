@@ -1,6 +1,7 @@
 import React from "react";
 import { InfernoApiClient } from "@project-inferno/api-client";
 import { UserDto } from "@project-inferno/contracts";
+import { TermsModal } from "./TermsModal.js";
 
 interface RegisterPageProps {
   apiClient: InfernoApiClient;
@@ -20,6 +21,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
   const [termsAccepted, setTermsAccepted] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [modalType, setModalType] = React.useState<"terms" | "privacy" | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,7 +128,22 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
             required
           />
           <label htmlFor="terms" style={{ fontSize: "13px", color: "#d4d4d8", cursor: "pointer" }}>
-            I agree to the <span style={{ color: "#ff922b", textDecoration: "underline" }}>Terms of Service</span> and <span style={{ color: "#ff922b", textDecoration: "underline" }}>Privacy Policy</span>.
+            I agree to the{" "}
+            <button
+              type="button"
+              onClick={() => setModalType("terms")}
+              style={{ background: "none", border: "none", padding: 0, color: "#ff922b", textDecoration: "underline", cursor: "pointer", fontSize: "13px" }}
+            >
+              Terms of Service
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              onClick={() => setModalType("privacy")}
+              style={{ background: "none", border: "none", padding: 0, color: "#ff922b", textDecoration: "underline", cursor: "pointer", fontSize: "13px" }}
+            >
+              Privacy Policy
+            </button>.
           </label>
         </div>
 
@@ -148,6 +165,12 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
           Sign In
         </button>
       </div>
+
+      <TermsModal
+        isOpen={modalType !== null}
+        onClose={() => setModalType(null)}
+        documentType={modalType || "terms"}
+      />
     </div>
   );
 };
