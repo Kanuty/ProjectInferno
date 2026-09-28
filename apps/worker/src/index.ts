@@ -88,8 +88,8 @@ export async function startWorker() {
   while (isRunning) {
     try {
       await processDueEvents();
-    } catch (err) {
-      console.error("[Worker] Polling loop error:", err);
+    } catch (err: any) {
+      console.error("[Worker] Polling loop error (Database may be unreachable):", err.message || err);
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }

@@ -45,10 +45,18 @@ export class InfernoApiClient {
       headers["Authorization"] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        ...options,
+        headers,
+      });
+    } catch (networkErr: any) {
+      throw new ApiClientError(
+        ErrorCode.INTERNAL_ERROR,
+        `Network request failed: Could not connect to API server at ${this.baseUrl}. (${networkErr.message || "Connection refused"})`
+      );
+    }
 
     if (!response.ok) {
       let errorData: ApiErrorResponse;
