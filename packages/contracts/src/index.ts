@@ -36,6 +36,7 @@ export interface RegisterRequest {
   username: string;
   email: string;
   passwordHash: string;
+  termsAccepted?: boolean;
 }
 
 export interface LoginRequest {
