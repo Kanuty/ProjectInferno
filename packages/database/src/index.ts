@@ -22,3 +22,20 @@ export async function runMigrations(): Promise<void> {
     throw err;
   }
 }
+
+export async function purgeUnactivatedAccounts(): Promise<number> {
+  try {
+    const res = await query(
+      `DELETE FROM users
+       WHERE status = 'pending_activation' AND created_at < NOW() - INTERVAL '7 days'`
+    );
+    const count = res.rowCount || 0;
+    if (count > 0) {
+      console.log(`[Database] Purged ${count} unactivated user accounts older than 7 days.`);
+    }
+    return count;
+  } catch (err: any) {
+    console.error("[Database] Failed purging unactivated accounts:", err.message || err);
+    return 0;
+  }
+}

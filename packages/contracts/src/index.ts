@@ -29,6 +29,7 @@ export interface UserDto {
   id: string;
   username: string;
   email: string;
+  status: "pending_activation" | "active" | "suspended";
   createdAt: string;
 }
 
@@ -40,13 +41,23 @@ export interface RegisterRequest {
 }
 
 export interface LoginRequest {
-  email: string;
+  login: string; // Accepts username or email address
   passwordHash: string;
+}
+
+export interface CheckUsernameResponse {
+  available: boolean;
+  message: string;
+}
+
+export interface ActivateAccountRequest {
+  token: string;
 }
 
 export interface AuthResponse {
   token: string;
   user: UserDto;
+  message?: string;
 }
 
 // World & Game Domain Contracts

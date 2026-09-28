@@ -15,13 +15,35 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
   onNavigateToLogin,
 }) => {
   const [username, setUsername] = React.useState("");
+  const [usernameStatus, setUsernameStatus] = React.useState<{ checking: boolean; available?: boolean; message?: string }>({ checking: false });
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
   const [termsAccepted, setTermsAccepted] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = React.useState<string | null>(null);
   const [modalType, setModalType] = React.useState<"terms" | "privacy" | null>(null);
+
+  const handleUsernameBlur = async () => {
+    const trimmed = username.trim();
+    if (trimmed.length < 3) {
+      if (trimmed.length > 0) {
+        setUsernameStatus({ checking: false, available: false, message: "Username must be at least 3 characters long." });
+      } else {
+        setUsernameStatus({ checking: false });
+      }
+      return;
+    }
+
+    setUsernameStatus({ checking: true });
+    try {
+      const res = await apiClient.checkUsername(trimmed);
+      setUsernameStatus({ checking: false, available: res.available, message: res.message });
+    } catch {
+      setUsernameStatus({ checking: false });
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +51,16 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
 
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
+      return;
+    }
+
+    if (usernameStatus.available === false) {
+      setError("Please select an available username.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters long.");
       return;
     }
 
@@ -40,12 +72,17 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
     setLoading(true);
     try {
       const res = await apiClient.register({
-        username,
-        email,
+        username: username.trim(),
+        email: email.trim(),
         passwordHash: password,
         termsAccepted,
       });
-      onSuccess(res.user);
+
+      if (res.user.status === "pending_activation") {
+        setSuccessNotice(res.message || "Account created! Please check your email for the confirmation link to activate your account before logging in.");
+      } else {
+        onSuccess(res.user);
+      }
     } catch (err: any) {
       setError(err.message || "Account registration failed. Please try again.");
     } finally {
@@ -60,12 +97,26 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
         Join Project Inferno and forge your empire across persistent dark-fantasy worlds.
       </p>
 
+      {successNotice && (
+        <div style={{ padding: "14px", background: "#113827", border: "1px solid #166534", borderRadius: "6px", color: "#86efac", fontSize: "14px", marginBottom: "16px" }}>
+          <p style={{ margin: "0 0 8px 0", fontWeight: "bold" }}>🎉 Account Registration Complete!</p>
+          <p style={{ margin: "0 0 12px 0" }}>{successNotice}</p>
+          <button
+            onClick={onNavigateToLogin}
+            style={{ padding: "8px 16px", background: "#51cf66", color: "#000", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}
+          >
+            Go to Login
+          </button>
+        </div>
+      )}
+
       {error && (
         <div style={{ padding: "10px 14px", background: "#3f1315", border: "1px solid #7f1d1d", borderRadius: "6px", color: "#fca5a5", fontSize: "14px", marginBottom: "16px" }}>
           {error}
         </div>
       )}
 
+      {!successNotice && (
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         <div>
           <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Username</label>
@@ -73,11 +124,22 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
             type="text"
             placeholder="Choose a player username"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setUsernameStatus({ checking: false });
+            }}
+            onBlur={handleUsernameBlur}
             style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
             minLength={3}
           />
+          {usernameStatus.checking && <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#a1a1aa" }}>Checking username availability...</p>}
+          {!usernameStatus.checking && usernameStatus.available === true && (
+            <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#86efac" }}>✓ Username is available</p>
+          )}
+          {!usernameStatus.checking && usernameStatus.available === false && (
+            <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#fca5a5" }}>✗ {usernameStatus.message}</p>
+          )}
         </div>
 
         <div>
@@ -96,12 +158,12 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
           <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Password</label>
           <input
             type="password"
-            placeholder="At least 6 characters"
+            placeholder="At least 8 characters"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
-            minLength={6}
+            minLength={8}
           />
         </div>
 
@@ -114,7 +176,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
             onChange={(e) => setConfirmPassword(e.target.value)}
             style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
-            minLength={6}
+            minLength={8}
           />
         </div>
 
@@ -155,6 +217,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({
           {loading ? "Creating Account..." : "Register Account"}
         </button>
       </form>
+      )}
 
       <div style={{ textAlign: "center", marginTop: "20px", borderTop: "1px solid #27272a", paddingTop: "16px" }}>
         <span style={{ fontSize: "14px", color: "#a1a1aa" }}>Already have an account? </span>

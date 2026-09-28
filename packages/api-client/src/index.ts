@@ -9,7 +9,9 @@ import {
   CreateGameEventRequest,
   GameEventDto,
   ApiErrorResponse,
-  ErrorCode
+  ErrorCode,
+  CheckUsernameResponse,
+  ActivateAccountRequest
 } from "@project-inferno/contracts";
 
 export class ApiClientError extends Error {
@@ -78,12 +80,29 @@ export class InfernoApiClient {
     return this.request<HealthCheckResponse>("/health");
   }
 
+  async checkUsername(username: string): Promise<CheckUsernameResponse> {
+    return this.request<CheckUsernameResponse>(`/api/auth/check-username?username=${encodeURIComponent(username)}`);
+  }
+
+  async activateAccount(token: string): Promise<AuthResponse> {
+    const res = await this.request<AuthResponse>("/api/auth/activate", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    if (res.token) {
+      this.setAuthToken(res.token);
+    }
+    return res;
+  }
+
   async register(data: RegisterRequest): Promise<AuthResponse> {
     const res = await this.request<AuthResponse>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
     });
-    this.setAuthToken(res.token);
+    if (res.token) {
+      this.setAuthToken(res.token);
+    }
     return res;
   }
 
@@ -92,7 +111,9 @@ export class InfernoApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
-    this.setAuthToken(res.token);
+    if (res.token) {
+      this.setAuthToken(res.token);
+    }
     return res;
   }
 
