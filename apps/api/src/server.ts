@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction, Express } from "express";
 import cors from "cors";
 import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto } from "@project-inferno/contracts";
-import { query } from "@project-inferno/database";
+import { query, runMigrations } from "@project-inferno/database";
 
 const app: Express = express();
 const PORT = process.env.PORT || 3000;
@@ -212,8 +212,15 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log(`API Server listening on port ${PORT}`);
+    if (process.env.AUTO_MIGRATE !== "false") {
+      try {
+        await runMigrations();
+      } catch (err: any) {
+        console.warn("[API] Startup database migration skipped or failed (Database may be offline/unreachable):", err.message || err);
+      }
+    }
   });
 }
 
