@@ -10,6 +10,36 @@ describe("InfernoApiClient Error Handling", () => {
     vi.restoreAllMocks();
   });
 
+  it("handles registration call with terms accepted", async () => {
+    const mockAuthResponse = {
+      token: "mock-jwt-token-123",
+      user: {
+        id: "123",
+        username: "inferno_warrior",
+        email: "warrior@inferno.com",
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockAuthResponse,
+      })
+    );
+
+    const res = await client.register({
+      username: "inferno_warrior",
+      email: "warrior@inferno.com",
+      passwordHash: "securePass123",
+      termsAccepted: true,
+    });
+
+    expect(res.token).toBe("mock-jwt-token-123");
+    expect(res.user.username).toBe("inferno_warrior");
+  });
+
   it("handles successful health check response", async () => {
     const mockHealth = {
       status: "ok",

@@ -31,7 +31,8 @@ app.get("/health", async (_req: Request, res: Response) => {
 
 // Auth Routes (Mock/Baseline implementations)
 app.post("/api/auth/register", async (req: Request, res: Response) => {
-  const { username, email, passwordHash } = req.body;
+  const { username, email, passwordHash, termsAccepted } = req.body;
+
   if (!username || !email || !passwordHash) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
@@ -39,10 +40,42 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
     } as ApiErrorResponse);
   }
 
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Please provide a valid email address.",
+    } as ApiErrorResponse);
+  }
+
+  if (username.trim().length < 3) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Username must be at least 3 characters long.",
+    } as ApiErrorResponse);
+  }
+
+  if (passwordHash.length < 6) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Password must be at least 6 characters long.",
+    } as ApiErrorResponse);
+  }
+
+  if (termsAccepted === false) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "You must accept the Terms of Service and Privacy Policy to register.",
+    } as ApiErrorResponse);
+  }
+
   try {
+    const termsAcceptedAt = termsAccepted ? new Date() : null;
     const dbRes = await query<UserDto>(
-      "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at as \"createdAt\"",
-      [username, email, passwordHash]
+      `INSERT INTO users (username, email, password_hash, terms_accepted_at)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, username, email, created_at as "createdAt"`,
+      [username.trim(), email.trim().toLowerCase(), passwordHash, termsAcceptedAt]
     );
     const user = dbRes.rows[0];
     return res.json({
@@ -50,9 +83,17 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
       user,
     });
   } catch (err: any) {
+    let message = err.message || "User registration failed.";
+    if (err.code === "23505") { // Unique violation in Postgres
+      if (err.constraint?.includes("username")) {
+        message = "A player with this username already exists.";
+      } else if (err.constraint?.includes("email")) {
+        message = "An account with this email address already exists.";
+      }
+    }
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
-      message: err.message || "User registration failed.",
+      message,
     } as ApiErrorResponse);
   }
 });
