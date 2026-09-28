@@ -9,6 +9,10 @@ export const pool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
+pool.on("error", (err) => {
+  console.error("[Database] Unexpected idle client error:", err.message || err);
+});
+
 export async function getClient(): Promise<PoolClient> {
   return await pool.connect();
 }
