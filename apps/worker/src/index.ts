@@ -1,7 +1,8 @@
-import { getClient } from "@project-inferno/database";
+import { getClient, purgeUnactivatedAccounts } from "@project-inferno/database";
 import { calculateResources } from "@project-inferno/game-core";
 
 const POLL_INTERVAL_MS = 2000;
+let pollCounter = 0;
 
 export async function processDueEvents() {
   const client = await getClient();
@@ -88,6 +89,11 @@ export async function startWorker() {
   while (isRunning) {
     try {
       await processDueEvents();
+      pollCounter++;
+      // Run account cleanup every 30 polling ticks (~60 seconds)
+      if (pollCounter % 30 === 0) {
+        await purgeUnactivatedAccounts();
+      }
     } catch (err: any) {
       console.error("[Worker] Polling loop error (Database may be unreachable):", err.message || err);
     }

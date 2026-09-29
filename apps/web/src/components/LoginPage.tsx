@@ -13,7 +13,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onSuccess,
   onNavigateToRegister,
 }) => {
-  const [email, setEmail] = React.useState("test@example.com");
+  const [login, setLogin] = React.useState("test@example.com");
   const [password, setPassword] = React.useState("password123");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -21,11 +21,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       const res = await apiClient.login({
-        email,
+        login: login.trim(),
         passwordHash: password,
       });
       onSuccess(res.user);
@@ -51,12 +57,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         <div>
-          <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Email Address</label>
+          <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Username or Email</label>
           <input
-            type="email"
-            placeholder="player@domain.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            type="text"
+            placeholder="Username or email address"
+            value={login}
+            onChange={(e) => setLogin(e.target.value)}
             style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
           />
@@ -66,11 +72,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Password</label>
           <input
             type="password"
-            placeholder="Your password"
+            placeholder="Your password (min 8 chars)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
+            minLength={8}
           />
         </div>
 

@@ -10,6 +10,28 @@ const apiClient = new InfernoApiClient(import.meta.env.VITE_API_URL || "http://l
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = React.useState<UserDto | null>(null);
   const [activeWorldId, setActiveWorldId] = React.useState<string | null>(null);
+  const [activationMessage, setActivationMessage] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("activationToken");
+    if (token) {
+      apiClient
+        .activateAccount(token)
+        .then((res) => {
+          setActivationMessage(res.message || "Account successfully activated!");
+          if (res.user) {
+            setCurrentUser(res.user);
+          }
+        })
+        .catch((err) => {
+          setActivationMessage(`Activation Error: ${err.message || "Invalid token"}`);
+        })
+        .finally(() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        });
+    }
+  }, []);
 
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: "20px" }}>
@@ -19,6 +41,12 @@ export const App: React.FC = () => {
       </header>
 
       <HealthStatus apiClient={apiClient} />
+
+      {activationMessage && (
+        <div style={{ padding: "12px 16px", background: "#113827", border: "1px solid #166534", borderRadius: "8px", color: "#86efac", marginBottom: "16px", fontSize: "14px" }}>
+          {activationMessage}
+        </div>
+      )}
 
       {!activeWorldId ? (
         <AccountShell

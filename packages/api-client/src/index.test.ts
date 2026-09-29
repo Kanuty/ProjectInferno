@@ -10,15 +10,56 @@ describe("InfernoApiClient Error Handling", () => {
     vi.restoreAllMocks();
   });
 
-  it("handles registration call with terms accepted", async () => {
+  it("checks username availability via API client", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ available: true, message: "Username is available." }),
+      })
+    );
+
+    const res = await client.checkUsername("lord_inferno");
+    expect(res.available).toBe(true);
+  });
+
+  it("activates account using confirmation token", async () => {
     const mockAuthResponse = {
       token: "mock-jwt-token-123",
       user: {
         id: "123",
         username: "inferno_warrior",
         email: "warrior@inferno.com",
+        status: "active",
         createdAt: new Date().toISOString(),
       },
+      message: "Account successfully activated!",
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockAuthResponse,
+      })
+    );
+
+    const res = await client.activateAccount("valid-token-123");
+    expect(res.token).toBe("mock-jwt-token-123");
+    expect(res.user.status).toBe("active");
+  });
+
+  it("handles registration call with terms accepted", async () => {
+    const mockAuthResponse = {
+      token: "",
+      user: {
+        id: "123",
+        username: "inferno_warrior",
+        email: "warrior@inferno.com",
+        status: "pending_activation",
+        createdAt: new Date().toISOString(),
+      },
+      message: "Account created!",
     };
 
     vi.stubGlobal(
@@ -36,8 +77,8 @@ describe("InfernoApiClient Error Handling", () => {
       termsAccepted: true,
     });
 
-    expect(res.token).toBe("mock-jwt-token-123");
     expect(res.user.username).toBe("inferno_warrior");
+    expect(res.user.status).toBe("pending_activation");
   });
 
   it("handles successful health check response", async () => {
@@ -76,11 +117,11 @@ describe("InfernoApiClient Error Handling", () => {
     );
 
     await expect(
-      client.login({ email: "wrong@test.com", passwordHash: "invalid" })
+      client.login({ login: "wrong@test.com", passwordHash: "invalidPass123" })
     ).rejects.toThrow(ApiClientError);
 
     try {
-      await client.login({ email: "wrong@test.com", passwordHash: "invalid" });
+      await client.login({ login: "wrong@test.com", passwordHash: "invalidPass123" });
     } catch (err: any) {
       expect(err).toBeInstanceOf(ApiClientError);
       expect(err.code).toBe(ErrorCode.UNAUTHORIZED);
