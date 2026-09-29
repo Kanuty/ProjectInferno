@@ -22,6 +22,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
   const [overview, setOverview] = useState<MapOverviewDto | null>(null);
   const [activeBase, setActiveBase] = useState<BaseDto | null>(null);
   const [selectedSettlement, setSelectedSettlement] = useState<BaseDto | null>(null);
+  const [hoveredBase, setHoveredBase] = useState<BaseDto | null>(null);
 
   // Viewport center axial q, r and zoom
   const [viewQ, setViewQ] = useState(0);
@@ -81,28 +82,54 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
     }
   };
 
-  // Mouse & Touch Drag Handlers
+  // Mouse & Touch Drag and Hover Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     setIsDragging(true);
     setDragStart({ x: e.clientX, y: e.clientY });
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDragging) return;
-    const dx = e.clientX - dragStart.x;
-    const dy = e.clientY - dragStart.y;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-    const hexRadius = Math.max(8, 36 * zoom);
-    const sensitivity = hexRadius * 1.5;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const hexRadius = Math.max(10, 36 * zoom);
 
-    if (Math.abs(dx) > sensitivity || Math.abs(dy) > sensitivity) {
-      const dq = Math.round(-dx / sensitivity);
-      const dr = Math.round(-dy / sensitivity);
+    // Hit-detection for hover glow
+    let foundHover: BaseDto | null = null;
+    let minDistance = Infinity;
 
-      const radius = world.config?.radius || 15;
-      setViewQ((prevQ) => Math.max(-radius, Math.min(radius, prevQ + dq)));
-      setViewR((prevR) => Math.max(-radius, Math.min(radius, prevR + dr)));
-      setDragStart({ x: e.clientX, y: e.clientY });
+    for (const base of settlements) {
+      if (typeof base?.q !== "number" || typeof base?.r !== "number") continue;
+      const x = centerX + hexRadius * (Math.sqrt(3) * (base.q - viewQ) + (Math.sqrt(3) / 2) * (base.r - viewR));
+      const y = centerY + hexRadius * ((3 / 2) * (base.r - viewR));
+      const dist = Math.hypot(mouseX - x, mouseY - y);
+      if (dist <= hexRadius * 0.9 && dist < minDistance) {
+        minDistance = dist;
+        foundHover = base;
+      }
+    }
+
+    setHoveredBase(foundHover);
+
+    if (isDragging) {
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      const sensitivity = hexRadius * 1.5;
+
+      if (Math.abs(dx) > sensitivity || Math.abs(dy) > sensitivity) {
+        const dq = Math.round(-dx / sensitivity);
+        const dr = Math.round(-dy / sensitivity);
+
+        const radius = world.config?.radius || 15;
+        setViewQ((prevQ) => Math.max(-radius, Math.min(radius, prevQ + dq)));
+        setViewR((prevR) => Math.max(-radius, Math.min(radius, prevR + dr)));
+        setDragStart({ x: e.clientX, y: e.clientY });
+      }
     }
   };
 
@@ -110,7 +137,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
     setIsDragging(false);
   };
 
-  // Render Main Map Canvas with True Hex Geometry and Cosmetic Terrain
+  // Render Main Map Canvas with Glow Effect for Hovered Base
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -133,14 +160,11 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
     const range = 8;
     for (let q = viewQ - range; q <= viewQ + range; q++) {
       for (let r = viewR - range; r <= viewR + range; r++) {
-        // Enforce true hex boundary check
         if (hexDistance(0, 0, q, r) > worldRadius) continue;
 
-        // Proper Pointy-Topped Hex Axial to Pixel Math
         const x = centerX + hexRadius * (Math.sqrt(3) * (q - viewQ) + (Math.sqrt(3) / 2) * (r - viewR));
         const y = centerY + hexRadius * ((3 / 2) * (r - viewR));
 
-        // Draw Hexagon Cell
         ctx.strokeStyle = "#334155";
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -156,7 +180,6 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // Coordinate label
         if (zoom >= 0.85) {
           ctx.fillStyle = "#475569";
           ctx.font = "10px sans-serif";
@@ -189,7 +212,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
       }
     }
 
-    // Render Settlements (Bases) without text clutter above tokens
+    // Render Settlements (Bases) with Hover Glow
     for (const base of settlements) {
       if (typeof base?.q !== "number" || typeof base?.r !== "number") continue;
       if (hexDistance(0, 0, base.q, base.r) > worldRadius) continue;
@@ -202,6 +225,21 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
       const isOwn = base.userId === currentUserId;
       const isActive = activeBase?.id === base.id;
       const isNeutral = !base.userId;
+      const isHovered = hoveredBase?.id === base.id;
+
+      // Glow Aura when Hovered
+      if (isHovered) {
+        ctx.save();
+        ctx.shadowColor = isOwn ? "#38bdf8" : isNeutral ? "#fef08a" : "#fca5a5";
+        ctx.shadowBlur = 18;
+
+        ctx.beginPath();
+        ctx.arc(x, y, hexRadius * 0.6, 0, 2 * Math.PI);
+        ctx.strokeStyle = "#fef08a";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+      }
 
       // Base Icon Circle Token
       ctx.beginPath();
@@ -210,19 +248,19 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
       if (isOwn) {
         ctx.fillStyle = isActive ? "#38bdf8" : "#0284c7";
       } else if (isNeutral) {
-        ctx.fillStyle = "#eab308"; // Yellow dirt/rock neutral base
+        ctx.fillStyle = "#eab308";
       } else {
-        ctx.fillStyle = "#ef4444"; // Enemy Player Base
+        ctx.fillStyle = "#ef4444";
       }
       ctx.fill();
 
-      ctx.strokeStyle = isActive ? "#ffffff" : "#0f172a";
-      ctx.lineWidth = isActive ? 3 : 1.5;
+      ctx.strokeStyle = isHovered ? "#ffffff" : isActive ? "#ffffff" : "#0f172a";
+      ctx.lineWidth = isHovered || isActive ? 3 : 1.5;
       ctx.stroke();
     }
-  }, [settlements, terrainFeatures, viewQ, viewR, zoom, activeBase, currentUserId, world]);
+  }, [settlements, terrainFeatures, viewQ, viewR, zoom, activeBase, hoveredBase, currentUserId, world]);
 
-  // Render Minimap Canvas Overview with Zoom Controls
+  // Render Minimap Canvas Overview without orange rectangle box
   useEffect(() => {
     if (!overview || !minimapCanvasRef.current) return;
     const canvas = minimapCanvasRef.current;
@@ -263,18 +301,9 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
         ctx.fill();
       }
     }
-
-    // Render current viewport box on minimap
-    const vx = centerX + scale * (Math.sqrt(3) * viewQ + (Math.sqrt(3) / 2) * viewR);
-    const vy = centerY + scale * ((3 / 2) * viewR);
-    if (!isNaN(vx) && !isNaN(vy)) {
-      ctx.strokeStyle = "#f97316";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(vx - 14, vy - 12, 28, 24);
-    }
   }, [overview, viewQ, viewR, currentUserId, minimapZoom]);
 
-  // Canvas Click Handler for Settlement Selection
+  // Canvas Click Handler with Expanded Click Target (0.9 * hexRadius)
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (isDragging) return;
     const canvas = canvasRef.current;
@@ -295,7 +324,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
       const x = centerX + hexRadius * (Math.sqrt(3) * (base.q - viewQ) + (Math.sqrt(3) / 2) * (base.r - viewR));
       const y = centerY + hexRadius * ((3 / 2) * (base.r - viewR));
       const dist = Math.hypot(clickX - x, clickY - y);
-      if (dist < hexRadius * 0.65 && dist < minDistance) {
+      if (dist <= hexRadius * 0.9 && dist < minDistance) {
         minDistance = dist;
         closest = base;
       }
@@ -313,7 +342,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", backgroundColor: "#1e293b", borderBottom: "1px solid #334155" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <h3 style={{ margin: 0, color: "#f97316", fontSize: "1.1rem" }}>{world.name} (Hex Map)</h3>
-          <span style={{ fontSize: "0.85rem", color: "#94a3b8" }}>Center: ({viewQ}, {viewR}) | Drag mouse/finger to pan</span>
+          <span style={{ fontSize: "0.85rem", color: "#94a3b8" }}>Center: ({viewQ}, {viewR}) | Drag to pan | Hover village to glow</span>
         </div>
 
         <div style={{ display: "flex", gap: "8px" }}>
@@ -337,7 +366,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onClick={handleCanvasClick}
-          style={{ width: "100%", height: "100%", cursor: isDragging ? "grabbing" : "grab", display: "block" }}
+          style={{ width: "100%", height: "100%", cursor: hoveredBase ? "pointer" : isDragging ? "grabbing" : "grab", display: "block" }}
         />
 
         {/* Larger Minimap Overlay in Bottom Right with Zoom Controls */}
