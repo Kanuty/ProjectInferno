@@ -227,8 +227,8 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   }
 
   try {
-    const dbRes = await query<UserDto & { password_hash: string; status: string }>(
-      `SELECT id, username, email, status, created_at as "createdAt", password_hash
+    const dbRes = await query<UserDto & { password_hash: string; status: string; role: "admin" | "user" }>(
+      `SELECT id, username, email, status, role, created_at as "createdAt", password_hash
        FROM users
        WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)`,
       [login.trim()]
@@ -269,32 +269,248 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   }
 });
 
+// Helper middleware to get authenticated user
+async function getAuthUser(req: Request): Promise<UserDto | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+  const token = authHeader.replace("Bearer ", "");
+  const userId = token.replace("mock-jwt-token-", "");
+  try {
+    const dbRes = await query<UserDto>(
+      `SELECT id, username, email, status, role, created_at as "createdAt" FROM users WHERE id = $1`,
+      [userId]
+    );
+    return dbRes.rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 // User Profile Route
 app.get("/api/users/me", async (req: Request, res: Response) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
+  const user = await getAuthUser(req);
+  if (!user) {
     return res.status(401).json({
       code: ErrorCode.UNAUTHORIZED,
-      message: "Missing Authorization header",
+      message: "Missing or invalid authorization header.",
+    } as ApiErrorResponse);
+  }
+  return res.json(user);
+});
+
+// Auth Password Reset - Forgot Password
+app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email || !email.trim()) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Email address is required.",
     } as ApiErrorResponse);
   }
 
-  const token = authHeader.replace("Bearer ", "");
-  const userId = token.replace("mock-jwt-token-", "");
+  try {
+    const dbRes = await query(
+      "SELECT id, username, email FROM users WHERE LOWER(email) = LOWER($1)",
+      [email.trim()]
+    );
+
+    if (dbRes.rows.length > 0) {
+      const user = dbRes.rows[0];
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 3600 * 1000); // 1 hour expiration
+
+      await query(
+        `UPDATE users
+         SET reset_token = $1, reset_token_expires_at = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [resetToken, expiresAt, user.id]
+      );
+
+      const resetLink = `http://localhost:5173/?resetToken=${resetToken}`;
+      console.log("=================================================");
+      console.log(`[MOCK EMAIL SERVICE] Password Reset email sent to ${user.email}`);
+      console.log(`Hello ${user.username}, you requested a password reset for your Project Inferno account:`);
+      console.log(`Reset Link: ${resetLink}`);
+      console.log("=================================================");
+    }
+
+    // Always return success message to prevent user enumeration
+    return res.json({
+      message: "If an account with that email exists, a password reset link has been sent to it.",
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// Auth Password Reset - Confirm Reset Password
+app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+  const { token, newPasswordHash } = req.body;
+  if (!token || !newPasswordHash) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Reset token and new password are required.",
+    } as ApiErrorResponse);
+  }
+
+  if (newPasswordHash.length < 8) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Password must be at least 8 characters long.",
+    } as ApiErrorResponse);
+  }
+
+  try {
+    const dbRes = await query(
+      `UPDATE users
+       SET password_hash = $1, reset_token = NULL, reset_token_expires_at = NULL, updated_at = NOW()
+       WHERE reset_token = $2 AND reset_token_expires_at > NOW()
+       RETURNING id, username, email`,
+      [newPasswordHash, token]
+    );
+
+    if (dbRes.rows.length === 0) {
+      return res.status(400).json({
+        code: ErrorCode.INVALID_INPUT,
+        message: "Invalid or expired password reset token.",
+      } as ApiErrorResponse);
+    }
+
+    return res.json({
+      message: "Password reset successful! You may now log in with your new password.",
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// Admin - Get All Users
+app.get("/api/admin/users", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || authUser.role !== "admin") {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
 
   try {
     const dbRes = await query<UserDto>(
-      "SELECT id, username, email, created_at as \"createdAt\" FROM users WHERE id = $1",
-      [userId]
+      `SELECT id, username, email, status, role, created_at as "createdAt"
+       FROM users
+       ORDER BY created_at DESC`
     );
+    return res.json(dbRes.rows);
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// Admin - Block/Unblock User
+app.post("/api/admin/users/:id/block", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || authUser.role !== "admin") {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (status !== "active" && status !== "suspended") {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Status must be 'active' or 'suspended'.",
+    } as ApiErrorResponse);
+  }
+
+  if (id === authUser.id) {
+    return res.status(400).json({
+      code: ErrorCode.ACTION_NOT_ALLOWED,
+      message: "You cannot change your own admin account status.",
+    } as ApiErrorResponse);
+  }
+
+  try {
+    const dbRes = await query<UserDto>(
+      `UPDATE users
+       SET status = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, username, email, status, role, created_at as "createdAt"`,
+      [status, id]
+    );
+
     if (dbRes.rows.length === 0) {
       return res.status(404).json({
         code: ErrorCode.NOT_FOUND,
-        message: "User not found",
+        message: "User not found.",
       } as ApiErrorResponse);
     }
 
     return res.json(dbRes.rows[0]);
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// Admin - Delete User (Sends email notification)
+app.delete("/api/admin/users/:id", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || authUser.role !== "admin") {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { id } = req.params;
+
+  if (id === authUser.id) {
+    return res.status(400).json({
+      code: ErrorCode.ACTION_NOT_ALLOWED,
+      message: "You cannot delete your own admin account.",
+    } as ApiErrorResponse);
+  }
+
+  try {
+    const dbRes = await query<UserDto>(
+      `DELETE FROM users
+       WHERE id = $1
+       RETURNING id, username, email, status, role, created_at as "createdAt"`,
+      [id]
+    );
+
+    if (dbRes.rows.length === 0) {
+      return res.status(404).json({
+        code: ErrorCode.NOT_FOUND,
+        message: "User not found.",
+      } as ApiErrorResponse);
+    }
+
+    const deletedUser = dbRes.rows[0];
+
+    console.log("=================================================");
+    console.log(`[MOCK EMAIL SERVICE] Account Deletion email sent to ${deletedUser.email}`);
+    console.log(`Hello ${deletedUser.username}, your Project Inferno account has been deleted by an administrator.`);
+    console.log("=================================================");
+
+    return res.json({
+      message: `Account for ${deletedUser.username} (${deletedUser.email}) has been permanently deleted and a notification email was sent.`,
+    });
   } catch (err: any) {
     return res.status(500).json({
       code: ErrorCode.INTERNAL_ERROR,
