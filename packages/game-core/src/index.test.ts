@@ -8,6 +8,12 @@ import {
   generateWorldMapPreview,
   selectPlayerSpawnHex,
   selectPeriodicNeutralSpawnHex,
+  getRaceDefinition,
+  isValidPlayableRace,
+  getNeutralRaceId,
+  SELECTABLE_RACES,
+  RACE_DEFINITIONS,
+  NEUTRAL_RACE_ID,
   DEFAULT_WORLD_MAP_CONFIG,
 } from "./index.js";
 
@@ -120,6 +126,46 @@ describe("Game Core Logic", () => {
       const dist = HexDistanceService.distance(0, 0, periodicHex!.q, periodicHex!.r);
       expect(dist).toBeGreaterThanOrEqual(2);
       expect(dist).toBeLessThanOrEqual(4);
+    });
+  });
+
+  describe("Races System & Validation", () => {
+    it("should define WEAREBEARS as the neutral race ID", () => {
+      expect(getNeutralRaceId()).toBe("WEAREBEARS");
+      expect(NEUTRAL_RACE_ID).toBe("WEAREBEARS");
+    });
+
+    it("should allow playable races and disallow WEAREBEARS or invalid IDs for selection", () => {
+      expect(isValidPlayableRace("HUMAN")).toBe(true);
+      expect(isValidPlayableRace("ANGEL")).toBe(true);
+      expect(isValidPlayableRace("DEVIL")).toBe(true);
+      expect(isValidPlayableRace("VAMPIRE")).toBe(true);
+      expect(isValidPlayableRace("NECROMANCER")).toBe(true);
+      expect(isValidPlayableRace("OLD_ONE")).toBe(true);
+
+      // WEAREBEARS must NOT be selectable
+      expect(isValidPlayableRace("WEAREBEARS")).toBe(false);
+      expect(SELECTABLE_RACES).not.toContain("WEAREBEARS");
+
+      expect(isValidPlayableRace("UNKNOWN")).toBe(false);
+      expect(isValidPlayableRace(null)).toBe(false);
+    });
+
+    it("should retrieve race definitions with presentation profiles, ecology, unit & building names", () => {
+      const humanDef = getRaceDefinition("HUMAN");
+      expect(humanDef.name).toBe("Human Kingdoms");
+      expect(humanDef.buildingNames.town_hall).toBe("Town Hall");
+      expect(humanDef.unitNames.u1).toBe("Conscript Levy");
+
+      const bearDef = getRaceDefinition("WEAREBEARS");
+      expect(bearDef.name).toBe("Wearebears Clan");
+      expect(bearDef.isSelectable).toBe(false);
+      expect(bearDef.buildingNames.town_hall).toBe("Bear Dens");
+      expect(bearDef.unitNames.u1).toBe("Bearhide Warrior");
+
+      // Fallback for null / unknown
+      const fallback = getRaceDefinition("UNKNOWN_RACE");
+      expect(fallback.id).toBe("HUMAN");
     });
   });
 });

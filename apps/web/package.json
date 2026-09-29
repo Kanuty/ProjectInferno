@@ -12,6 +12,7 @@
   "dependencies": {
     "@project-inferno/api-client": "workspace:*",
     "@project-inferno/contracts": "workspace:*",
+    "@project-inferno/game-core": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

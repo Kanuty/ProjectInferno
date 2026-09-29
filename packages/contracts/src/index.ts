@@ -246,6 +246,28 @@ export interface WorldPreviewResponse {
   feasibilityScore: number;
 }
 
+export type PlayableRaceId = "HUMAN" | "ANGEL" | "DEVIL" | "VAMPIRE" | "NECROMANCER" | "OLD_ONE";
+export type NeutralRaceId = "WEAREBEARS";
+export type RaceId = PlayableRaceId | NeutralRaceId;
+
+export interface RaceEcology {
+  terrainType: string;
+  description: string;
+  primaryColor: string;
+}
+
+export interface RaceDefinition {
+  id: RaceId;
+  name: string;
+  description: string;
+  icon: string;
+  badgeEmoji: string;
+  isSelectable: boolean;
+  ecology: RaceEcology;
+  buildingNames: Record<string, string>;
+  unitNames: Record<string, string>;
+}
+
 export interface JoinWorldRequest {
   tintRaceId?: string;
 }

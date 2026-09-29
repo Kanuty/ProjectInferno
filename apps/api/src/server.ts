@@ -23,6 +23,8 @@ import {
   generateWorldMapPreview,
   selectPlayerSpawnHex,
   generateCosmeticTerrainFeatures,
+  isValidPlayableRace,
+  NEUTRAL_RACE_ID,
 } from "@project-inferno/game-core";
 
 const memoryEmailLogs: EmailLogDto[] = [];
@@ -575,10 +577,10 @@ app.post("/api/admin/worlds", async (req: Request, res: Response) => {
     const preview = generateWorldMapPreview(mapConfig);
     for (const hex of preview.initialNeutrals) {
       await client.query(
-        `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, neutral_origin, points)
-         VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, 'GENERATED_INITIAL', 100)
+        `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, tint_race_id, neutral_origin, points)
+         VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, $4, 'GENERATED_INITIAL', 100)
          ON CONFLICT (world_id, q, r) DO NOTHING`,
-        [createdWorld.id, hex.q, hex.r]
+        [createdWorld.id, hex.q, hex.r, NEUTRAL_RACE_ID]
       );
     }
 
@@ -743,6 +745,13 @@ app.post("/api/worlds/:worldId/join", async (req: Request, res: Response) => {
   const { worldId } = req.params;
   const { tintRaceId } = req.body;
 
+  if (!tintRaceId || !isValidPlayableRace(tintRaceId)) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "A valid initial playable race must be selected (WEAREBEARS is a neutral race and cannot be chosen).",
+    } as ApiErrorResponse);
+  }
+
   const client = await getClient();
   try {
     await client.query("BEGIN");
@@ -814,13 +823,13 @@ app.post("/api/worlds/:worldId/join", async (req: Request, res: Response) => {
     for (let i = 0; i < spawnSelection.guaranteedNeutrals.length; i++) {
       const nHex = spawnSelection.guaranteedNeutrals[i];
       const neutralRes = await client.query(
-        `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, neutral_origin, points)
-         VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, 'GENERATED_START_GUARANTEE', 100)
+        `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, tint_race_id, neutral_origin, points)
+         VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, $4, 'GENERATED_START_GUARANTEE', 100)
          ON CONFLICT (world_id, q, r) DO NOTHING
          RETURNING id, world_id as "worldId", user_id as "userId", name, q, r,
                    position_x as "positionX", position_y as "positionY",
-                   neutral_origin as "neutralOrigin", points, created_at as "createdAt"`,
-        [worldId, nHex.q, nHex.r]
+                   tint_race_id as "tintRaceId", neutral_origin as "neutralOrigin", points, created_at as "createdAt"`,
+        [worldId, nHex.q, nHex.r, NEUTRAL_RACE_ID]
       );
 
       if (neutralRes.rows.length > 0) {
