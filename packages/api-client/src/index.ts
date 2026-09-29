@@ -135,4 +135,35 @@ export class InfernoApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(token: string, newPasswordHash: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, newPasswordHash }),
+    });
+  }
+
+  async adminGetAllUsers(): Promise<UserDto[]> {
+    return this.request<UserDto[]>("/api/admin/users");
+  }
+
+  async adminBlockUser(userId: string, status: "active" | "suspended"): Promise<UserDto> {
+    return this.request<UserDto>(`/api/admin/users/${userId}/block`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async adminDeleteUser(userId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/users/${userId}`, {
+      method: "DELETE",
+    });
+  }
 }

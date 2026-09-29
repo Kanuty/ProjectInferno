@@ -30,7 +30,21 @@ export interface UserDto {
   username: string;
   email: string;
   status: "pending_activation" | "active" | "suspended";
+  role?: "admin" | "user";
   createdAt: string;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPasswordHash: string;
+}
+
+export interface AdminBlockUserRequest {
+  status: "active" | "suspended";
 }
 
 export interface RegisterRequest {

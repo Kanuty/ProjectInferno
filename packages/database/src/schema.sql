@@ -16,7 +16,17 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'pending_activation';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS activation_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+-- Seed default super user (admin / admin)
+INSERT INTO users (username, email, password_hash, role, status)
+VALUES ('admin', 'admin@project-inferno.com', 'admin', 'admin', 'active')
+ON CONFLICT (username) DO UPDATE SET
+  role = 'admin',
+  status = 'active';
 
 -- Case-insensitive unique indexes for strict concurrency protection against duplicate usernames/emails
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_lower_username ON users (LOWER(username));
