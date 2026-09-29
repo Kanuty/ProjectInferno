@@ -88,7 +88,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
 
     const centerX = width / 2;
     const centerY = height / 2;
-    const hexRadius = 32 * zoom;
+    const hexRadius = Math.max(8, 32 * zoom);
 
     // Render Hex Grid cells around viewport
     const range = 6;
@@ -125,8 +125,11 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
 
     // Render Settlements (Bases)
     for (const base of settlements) {
+      if (typeof base?.q !== "number" || typeof base?.r !== "number") continue;
       const x = centerX + (base.q - viewQ + (base.r - viewR) / 2) * hexRadius * 1.732;
       const y = centerY + (base.r - viewR) * hexRadius * 1.5;
+
+      if (isNaN(x) || isNaN(y)) continue;
 
       const isOwn = base.userId === currentUserId;
       const isActive = activeBase?.id === base.id;
@@ -171,10 +174,10 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, width, height);
 
-    const r = overview.radius;
+    const r = Math.max(1, overview.radius || 15);
     const centerX = width / 2;
     const centerY = height / 2;
-    const scale = Math.min(width, height) / (2 * r + 2);
+    const scale = Math.max(0.5, Math.min(width, height) / (2 * r + 2));
 
     // Draw world border
     ctx.strokeStyle = "#334155";
@@ -184,22 +187,29 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
     ctx.stroke();
 
     // Render settlements
-    for (const item of overview.settlements) {
-      const x = centerX + (item.q + item.r / 2) * scale * 1.5;
-      const y = centerY + item.r * scale * 1.3;
+    if (Array.isArray(overview.settlements)) {
+      for (const item of overview.settlements) {
+        if (typeof item?.q !== "number" || typeof item?.r !== "number") continue;
+        const x = centerX + (item.q + item.r / 2) * scale * 1.5;
+        const y = centerY + item.r * scale * 1.3;
 
-      ctx.fillStyle = item.userId === currentUserId ? "#38bdf8" : item.isNeutral ? "#eab308" : "#ef4444";
-      ctx.beginPath();
-      ctx.arc(x, y, scale * 0.4, 0, 2 * Math.PI);
-      ctx.fill();
+        if (isNaN(x) || isNaN(y)) continue;
+
+        ctx.fillStyle = item.userId === currentUserId ? "#38bdf8" : item.isNeutral ? "#eab308" : "#ef4444";
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(1, scale * 0.4), 0, 2 * Math.PI);
+        ctx.fill();
+      }
     }
 
     // Render current viewport box on minimap
     const vx = centerX + (viewQ + viewR / 2) * scale * 1.5;
     const vy = centerY + viewR * scale * 1.3;
-    ctx.strokeStyle = "#f97316";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(vx - 12, vy - 10, 24, 20);
+    if (!isNaN(vx) && !isNaN(vy)) {
+      ctx.strokeStyle = "#f97316";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(vx - 12, vy - 10, 24, 20);
+    }
   }, [overview, viewQ, viewR, currentUserId]);
 
   // Canvas Click Handler
@@ -218,6 +228,7 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
     let minDistance = Infinity;
 
     for (const base of settlements) {
+      if (typeof base?.q !== "number" || typeof base?.r !== "number") continue;
       const x = centerX + (base.q - viewQ + (base.r - viewR) / 2) * hexRadius * 1.732;
       const y = centerY + (base.r - viewR) * hexRadius * 1.5;
       const dist = Math.hypot(clickX - x, clickY - y);
