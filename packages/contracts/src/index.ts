@@ -28,10 +28,17 @@ export interface HealthCheckResponse {
 export interface UserDto {
   id: string;
   username: string;
-  email: string;
+  email?: string | null;
   status: "pending_activation" | "active" | "suspended";
-  role?: "admin" | "user";
+  role?: "super_admin" | "admin" | "user";
   createdAt: string;
+}
+
+export interface AdminCreateUserRequest {
+  username: string;
+  passwordHash: string;
+  email?: string;
+  role?: "super_admin" | "admin" | "user";
 }
 
 export interface ForgotPasswordRequest {
@@ -84,11 +91,34 @@ export interface AuthResponse {
 }
 
 // World & Game Domain Contracts
+export type WorldStageStatus =
+  | "planned_open"
+  | "planned_closed"
+  | "active"
+  | "active_closed"
+  | "suspended"
+  | "archived";
+
 export interface WorldDto {
   id: string;
   name: string;
-  status: "active" | "archived" | "maintenance";
+  status: WorldStageStatus;
+  startsAt?: string | null;
+  maxPlayers?: number;
+  reservedCount?: number;
+  isReservedByMe?: boolean;
   createdAt: string;
+}
+
+export interface CreateWorldRequest {
+  name: string;
+  startsAt?: string;
+  maxPlayers?: number;
+  status?: WorldStageStatus;
+}
+
+export interface UpdateWorldStatusRequest {
+  status: WorldStageStatus;
 }
 
 export interface PlayerBaseDto {

@@ -1,5 +1,5 @@
 import React from "react";
-import { UserDto, WorldDto, EmailLogDto } from "@project-inferno/contracts";
+import { UserDto, WorldDto, EmailLogDto, WorldStageStatus } from "@project-inferno/contracts";
 import { InfernoApiClient } from "@project-inferno/api-client";
 import { RegisterPage } from "./RegisterPage.js";
 import { LoginPage } from "./LoginPage.js";
@@ -26,9 +26,95 @@ export const AccountShell: React.FC<AccountShellProps> = ({
   // Admin state
   const [adminUsers, setAdminUsers] = React.useState<UserDto[]>([]);
   const [emailLogs, setEmailLogs] = React.useState<EmailLogDto[]>([]);
-  const [adminTab, setAdminTab] = React.useState<"accounts" | "emailLogs">("accounts");
+  const [adminTab, setAdminTab] = React.useState<"accounts" | "createUser" | "worlds" | "emailLogs">("accounts");
   const [adminMessage, setAdminMessage] = React.useState<string | null>(null);
   const [adminError, setAdminError] = React.useState<string | null>(null);
+
+  // Manual create user form state
+  const [newUsername, setNewUsername] = React.useState("");
+  const [newPassword, setNewPassword] = React.useState("");
+  const [newEmail, setNewEmail] = React.useState("");
+  const [newRole, setNewRole] = React.useState<"user" | "admin" | "super_admin">("user");
+
+  // Create world form state
+  const [newWorldName, setNewWorldName] = React.useState("");
+  const [newWorldStartsAt, setNewWorldStartsAt] = React.useState("");
+  const [newWorldMaxPlayers, setNewWorldMaxPlayers] = React.useState(100);
+  const [newWorldStatus, setNewWorldStatus] = React.useState<WorldStageStatus>("planned_open");
+
+  const handleAdminCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminMessage(null);
+    setAdminError(null);
+    try {
+      const created = await apiClient.adminCreateUser({
+        username: newUsername.trim(),
+        passwordHash: newPassword,
+        email: newEmail.trim() || undefined,
+        role: newRole,
+      });
+      setAdminMessage(`Account ${created.username} (${created.role}) successfully created.`);
+      setNewUsername("");
+      setNewPassword("");
+      setNewEmail("");
+      await loadAdminUsers();
+      setAdminTab("accounts");
+    } catch (err: any) {
+      setAdminError(err.message || "Failed to create user.");
+    }
+  };
+
+  const handleAdminCreateWorld = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminMessage(null);
+    setAdminError(null);
+    try {
+      const world = await apiClient.adminCreateWorld({
+        name: newWorldName.trim(),
+        startsAt: newWorldStartsAt ? new Date(newWorldStartsAt).toISOString() : undefined,
+        maxPlayers: newWorldMaxPlayers,
+        status: newWorldStatus,
+      });
+      setAdminMessage(`World '${world.name}' scheduled in '${world.status}' state.`);
+      setNewWorldName("");
+      setNewWorldStartsAt("");
+      await loadWorlds();
+    } catch (err: any) {
+      setAdminError(err.message || "Failed to create world.");
+    }
+  };
+
+  const handleUpdateWorldStatus = async (worldId: string, status: WorldStageStatus) => {
+    setAdminMessage(null);
+    setAdminError(null);
+    try {
+      await apiClient.adminUpdateWorldStatus(worldId, status);
+      setAdminMessage(`World status updated to '${status}'.`);
+      await loadWorlds();
+    } catch (err: any) {
+      setAdminError(err.message || "Failed to update world status.");
+    }
+  };
+
+  const handleReserveWorldSlot = async (worldId: string) => {
+    try {
+      const res = await apiClient.reserveWorldSlot(worldId);
+      alert(res.message);
+      await loadWorlds();
+    } catch (err: any) {
+      alert(err.message || "Failed to reserve slot.");
+    }
+  };
+
+  const handleCancelWorldReservation = async (worldId: string) => {
+    try {
+      const res = await apiClient.cancelWorldReservation(worldId);
+      alert(res.message);
+      await loadWorlds();
+    } catch (err: any) {
+      alert(err.message || "Failed to cancel reservation.");
+    }
+  };
 
   const loadAdminUsers = async () => {
     try {
@@ -90,7 +176,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
   React.useEffect(() => {
     if (currentUser) {
       loadWorlds();
-      if (currentUser.role === "admin") {
+      if (currentUser.role === "admin" || currentUser.role === "super_admin") {
         loadAdminUsers();
         loadEmailLogs();
       }
@@ -121,21 +207,21 @@ export const AccountShell: React.FC<AccountShellProps> = ({
     <div style={{ padding: "20px", background: "#18181b", borderRadius: "10px", border: "1px solid #27272a", marginBottom: "16px" }}>
       <h3 style={{ margin: "0 0 12px 0", color: "#ff922b" }}>Account Dashboard</h3>
       <p style={{ margin: "0 0 16px 0", color: "#e4e4e7" }}>
-        Welcome back, <strong style={{ color: "#ff922b" }}>{currentUser.username}</strong> ({currentUser.email})
-        {currentUser.role === "admin" && (
-          <span style={{ marginLeft: "8px", padding: "2px 8px", background: "#7c2d12", color: "#fdba74", borderRadius: "4px", fontSize: "12px", fontWeight: "bold" }}>
-            ADMIN
+        Welcome back, <strong style={{ color: "#ff922b" }}>{currentUser.username}</strong> ({currentUser.email || "No Email Associated"})
+        {(currentUser.role === "admin" || currentUser.role === "super_admin") && (
+          <span style={{ marginLeft: "8px", padding: "2px 8px", background: currentUser.role === "super_admin" ? "#991b1b" : "#7c2d12", color: "#fdba74", borderRadius: "4px", fontSize: "12px", fontWeight: "bold" }}>
+            {currentUser.role === "super_admin" ? "SUPER ADMIN" : "ADMIN"}
           </span>
         )}
       </p>
 
       {error && <p style={{ color: "#ff6b6b", fontSize: "14px" }}>{error}</p>}
 
-      {currentUser.role === "admin" && (
+      {(currentUser.role === "admin" || currentUser.role === "super_admin") && (
         <div style={{ marginTop: "20px", marginBottom: "24px", borderTop: "1px solid #27272a", paddingTop: "16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-            <h4 style={{ margin: 0, color: "#f97316" }}>Admin Dashboard</h4>
-            <div style={{ display: "flex", gap: "8px" }}>
+            <h4 style={{ margin: 0, color: "#f97316" }}>Admin Console & Developer Dashboard</h4>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
               <button
                 onClick={() => setAdminTab("accounts")}
                 style={{
@@ -146,10 +232,40 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                   borderRadius: "6px",
                   fontWeight: "bold",
                   cursor: "pointer",
-                  fontSize: "13px",
+                  fontSize: "12px",
                 }}
               >
-                Accounts
+                Accounts ({adminUsers.length})
+              </button>
+              <button
+                onClick={() => setAdminTab("createUser")}
+                style={{
+                  padding: "6px 12px",
+                  background: adminTab === "createUser" ? "#f97316" : "#27272a",
+                  color: adminTab === "createUser" ? "#000" : "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                }}
+              >
+                + Create User
+              </button>
+              <button
+                onClick={() => setAdminTab("worlds")}
+                style={{
+                  padding: "6px 12px",
+                  background: adminTab === "worlds" ? "#f97316" : "#27272a",
+                  color: adminTab === "worlds" ? "#000" : "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                }}
+              >
+                World Lifecycle
               </button>
               <button
                 onClick={() => { setAdminTab("emailLogs"); loadEmailLogs(); }}
@@ -161,7 +277,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                   borderRadius: "6px",
                   fontWeight: "bold",
                   cursor: "pointer",
-                  fontSize: "13px",
+                  fontSize: "12px",
                 }}
               >
                 Email Logs ({emailLogs.length})
@@ -197,12 +313,14 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {adminUsers.map((u) => (
+                  {adminUsers.map((u) => {
+                    const isProtected = u.role === "super_admin" || u.username.toLowerCase() === "inferno";
+                    return (
                       <tr key={u.id} style={{ borderBottom: "1px solid #27272a" }}>
-                        <td style={{ padding: "10px" }}>{u.username}</td>
-                        <td style={{ padding: "10px" }}>{u.email}</td>
+                        <td style={{ padding: "10px", fontWeight: isProtected ? "bold" : "normal" }}>{u.username}</td>
+                        <td style={{ padding: "10px" }}>{u.email || <em style={{ color: "#71717a" }}>None</em>}</td>
                         <td style={{ padding: "10px" }}>
-                          <span style={{ color: u.role === "admin" ? "#f97316" : "#a1a1aa", fontWeight: u.role === "admin" ? "bold" : "normal" }}>
+                          <span style={{ color: u.role === "super_admin" ? "#ef4444" : u.role === "admin" ? "#f97316" : "#a1a1aa", fontWeight: u.role ? "bold" : "normal" }}>
                             {u.role || "user"}
                           </span>
                         </td>
@@ -215,7 +333,9 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                           </span>
                         </td>
                         <td style={{ padding: "10px", display: "flex", gap: "8px" }}>
-                          {u.id !== currentUser.id && (
+                          {isProtected ? (
+                            <span style={{ fontSize: "12px", color: "#a1a1aa", fontStyle: "italic" }}>Protected Account</span>
+                          ) : u.id !== currentUser.id ? (
                             <>
                               <button
                                 onClick={() => handleToggleBlockUser(u)}
@@ -246,14 +366,179 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                                 Delete
                               </button>
                             </>
-                          )}
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : adminTab === "createUser" ? (
+            <div style={{ background: "#27272a", padding: "16px", borderRadius: "8px" }}>
+              <h5 style={{ margin: "0 0 12px 0", color: "#ff922b", fontSize: "15px" }}>Manually Create User Account</h5>
+              <form onSubmit={handleAdminCreateUser} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Username *</label>
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    required
+                    style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Password *</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Email Address (Optional)</label>
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="Leave empty for no email"
+                    style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Account Role</label>
+                  <select
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value as any)}
+                    style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                    {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
+                  </select>
+                </div>
+                <div style={{ gridColumn: "span 2", marginTop: "8px" }}>
+                  <button type="submit" style={{ padding: "8px 16px", background: "#ff922b", color: "#000", fontWeight: "bold", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                    Create Account
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : adminTab === "worlds" ? (
+            <div>
+              <div style={{ background: "#27272a", padding: "16px", borderRadius: "8px", marginBottom: "16px" }}>
+                <h5 style={{ margin: "0 0 12px 0", color: "#ff922b", fontSize: "15px" }}>Schedule & Create New Game World</h5>
+                <form onSubmit={handleAdminCreateWorld} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>World Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. World Epsilon"
+                      value={newWorldName}
+                      onChange={(e) => setNewWorldName(e.target.value)}
+                      required
+                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Scheduled Start Date/Time</label>
+                    <input
+                      type="datetime-local"
+                      value={newWorldStartsAt}
+                      onChange={(e) => setNewWorldStartsAt(e.target.value)}
+                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Max Player Capacity</label>
+                    <input
+                      type="number"
+                      value={newWorldMaxPlayers}
+                      onChange={(e) => setNewWorldMaxPlayers(parseInt(e.target.value) || 100)}
+                      min={1}
+                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Initial Stage Status</label>
+                    <select
+                      value={newWorldStatus}
+                      onChange={(e) => setNewWorldStatus(e.target.value as any)}
+                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                    >
+                      <option value="planned_open">Planned - Open Reservation</option>
+                      <option value="planned_closed">Planned - Closed Reservation</option>
+                      <option value="active">Active (Playable)</option>
+                      <option value="active_closed">Active - Closed to New Joiners</option>
+                      <option value="suspended">Suspended (Frozen)</option>
+                      <option value="archived">Archived (Closed)</option>
+                    </select>
+                  </div>
+                  <div style={{ gridColumn: "span 2", marginTop: "8px" }}>
+                    <button type="submit" style={{ padding: "8px 16px", background: "#ff922b", color: "#000", fontWeight: "bold", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                      Schedule & Create World
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Developer Console State Reference Card */}
+              <div style={{ background: "#18181b", padding: "12px", borderRadius: "6px", border: "1px solid #3f3f46", marginBottom: "16px", fontSize: "12px", color: "#a1a1aa" }}>
+                <strong style={{ color: "#ff922b" }}>[Admin Developer Console] World Stage Lifecycle Reference:</strong>
+                <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+                  <li><strong>planned_open:</strong> World scheduled in future. Players can reserve right to play.</li>
+                  <li><strong>planned_closed:</strong> World scheduled in future, but new player reservations are locked.</li>
+                  <li><strong>active:</strong> World currently live and open for gameplay and registration.</li>
+                  <li><strong>active_closed:</strong> World actively running, but no new players can join.</li>
+                  <li><strong>suspended:</strong> World state frozen in time for maintenance/admin review.</li>
+                  <li><strong>archived:</strong> World permanently closed; read-only history.</li>
+                </ul>
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", color: "#e4e4e7", fontSize: "13px" }}>
+                  <thead>
+                    <tr style={{ background: "#27272a", textAlign: "left" }}>
+                      <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>World Name</th>
+                      <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Start Time</th>
+                      <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Reservations</th>
+                      <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Current Stage</th>
+                      <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Change Stage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {worlds.map((w) => (
+                      <tr key={w.id} style={{ borderBottom: "1px solid #27272a" }}>
+                        <td style={{ padding: "8px", fontWeight: "bold" }}>{w.name}</td>
+                        <td style={{ padding: "8px", color: "#a1a1aa" }}>{w.startsAt ? new Date(w.startsAt).toLocaleString() : "Immediate"}</td>
+                        <td style={{ padding: "8px" }}>{w.reservedCount || 0} / {w.maxPlayers || 100}</td>
+                        <td style={{ padding: "8px", fontWeight: "bold", color: w.status === "active" ? "#86efac" : w.status.startsWith("planned") ? "#fdba74" : "#fca5a5" }}>
+                          {w.status}
+                        </td>
+                        <td style={{ padding: "8px" }}>
+                          <select
+                            value={w.status}
+                            onChange={(e) => handleUpdateWorldStatus(w.id, e.target.value as WorldStageStatus)}
+                            style={{ padding: "4px 8px", borderRadius: "4px", background: "#27272a", color: "#fff", border: "1px solid #3f3f46" }}
+                          >
+                            <option value="planned_open">planned_open</option>
+                            <option value="planned_closed">planned_closed</option>
+                            <option value="active">active</option>
+                            <option value="active_closed">active_closed</option>
+                            <option value="suspended">suspended</option>
+                            <option value="archived">archived</option>
+                          </select>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )
+            </div>
           ) : (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
@@ -309,19 +594,61 @@ export const AccountShell: React.FC<AccountShellProps> = ({
         <p style={{ color: "#a1a1aa", fontSize: "14px" }}>No active worlds available or loading worlds...</p>
       ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {worlds.map((w) => (
-            <li key={w.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "#27272a", marginBottom: "8px", borderRadius: "6px" }}>
-              <span>
-                <strong>{w.name}</strong> <small style={{ color: "#a1a1aa" }}>({w.status})</small>
-              </span>
-              <button
-                onClick={() => onSelectWorld(w.id)}
-                style={{ padding: "8px 16px", background: "#ff922b", color: "#000", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
-              >
-                Enter World
-              </button>
-            </li>
-          ))}
+          {worlds.map((w) => {
+            const isPlayable = w.status === "active" || w.status === "active_closed";
+            const isReservable = w.status === "planned_open";
+            return (
+              <li key={w.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "#27272a", marginBottom: "8px", borderRadius: "6px" }}>
+                <div>
+                  <strong>{w.name}</strong>{" "}
+                  <span style={{ fontSize: "12px", padding: "2px 6px", background: "#3f3f46", color: "#fdba74", borderRadius: "4px", marginLeft: "6px" }}>
+                    Stage: {w.status}
+                  </span>
+                  {w.startsAt && (
+                    <div style={{ fontSize: "12px", color: "#a1a1aa", marginTop: "4px" }}>
+                      Starts At: {new Date(w.startsAt).toLocaleString()}
+                    </div>
+                  )}
+                  {w.status.startsWith("planned") && (
+                    <div style={{ fontSize: "12px", color: "#a1a1aa" }}>
+                      Reservations: {w.reservedCount || 0} / {w.maxPlayers || 100} players
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: "8px" }}>
+                  {isPlayable ? (
+                    <button
+                      onClick={() => onSelectWorld(w.id)}
+                      style={{ padding: "8px 16px", background: "#ff922b", color: "#000", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                    >
+                      Enter World
+                    </button>
+                  ) : isReservable ? (
+                    w.isReservedByMe ? (
+                      <button
+                        onClick={() => handleCancelWorldReservation(w.id)}
+                        style={{ padding: "8px 16px", background: "#991b1b", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                      >
+                        Cancel Reservation
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleReserveWorldSlot(w.id)}
+                        style={{ padding: "8px 16px", background: "#166534", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                      >
+                        Reserve Right to Play
+                      </button>
+                    )
+                  ) : (
+                    <span style={{ fontSize: "13px", color: "#a1a1aa", fontStyle: "italic" }}>
+                      {w.status === "planned_closed" ? "Reservation Closed" : "World Unavailable"}
+                    </span>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

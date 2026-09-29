@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction, Express } from "express";
 import cors from "cors";
 import crypto from "crypto";
-import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto, CheckUsernameResponse, AuthResponse, EmailLogDto } from "@project-inferno/contracts";
+import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto, CheckUsernameResponse, AuthResponse, EmailLogDto, WorldStageStatus } from "@project-inferno/contracts";
 import { query, runMigrations, getClient, purgeUnactivatedAccounts } from "@project-inferno/database";
 
 // In-memory fallback email log store if DB table isn't ready
@@ -169,7 +169,9 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
     const senderEmail = "noreply@project-inferno.com";
     const subject = "Activate your Project Inferno account";
 
-    await logEmailSent(user.email, senderEmail, subject, "success");
+    if (user.email) {
+      await logEmailSent(user.email, senderEmail, subject, "success");
+    }
 
     console.log("=================================================");
     console.log(`[MOCK EMAIL SERVICE] ${subject} sent to ${user.email}`);
@@ -248,10 +250,10 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   }
 
   try {
-    const dbRes = await query<UserDto & { password_hash: string; status: string; role: "admin" | "user" }>(
+    const dbRes = await query<UserDto & { password_hash: string; status: string; role: "super_admin" | "admin" | "user" }>(
       `SELECT id, username, email, status, role, created_at as "createdAt", password_hash
        FROM users
-       WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)`,
+       WHERE (email IS NOT NULL AND LOWER(email) = LOWER($1)) OR LOWER(username) = LOWER($1)`,
       [login.trim()]
     );
 
@@ -419,7 +421,7 @@ app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
 // Admin - Get All Users
 app.get("/api/admin/users", async (req: Request, res: Response) => {
   const authUser = await getAuthUser(req);
-  if (!authUser || authUser.role !== "admin") {
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
     return res.status(403).json({
       code: ErrorCode.FORBIDDEN,
       message: "Access denied. Admin privileges required.",
@@ -444,7 +446,7 @@ app.get("/api/admin/users", async (req: Request, res: Response) => {
 // Admin - Get Email Logs
 app.get("/api/admin/email-logs", async (req: Request, res: Response) => {
   const authUser = await getAuthUser(req);
-  if (!authUser || authUser.role !== "admin") {
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
     return res.status(403).json({
       code: ErrorCode.FORBIDDEN,
       message: "Access denied. Admin privileges required.",
@@ -467,10 +469,52 @@ app.get("/api/admin/email-logs", async (req: Request, res: Response) => {
   }
 });
 
+// Admin - Manual Create User
+app.post("/api/admin/users", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { username, passwordHash, email, role } = req.body;
+  if (!username || !passwordHash) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Username and passwordHash are required.",
+    } as ApiErrorResponse);
+  }
+
+  const targetRole = role === "super_admin" && authUser.role === "super_admin" ? "super_admin" : role === "admin" ? "admin" : "user";
+  const userEmail = email && email.trim() ? email.trim().toLowerCase() : null;
+
+  try {
+    const dbRes = await query<UserDto>(
+      `INSERT INTO users (username, email, password_hash, role, status)
+       VALUES ($1, $2, $3, $4, 'active')
+       RETURNING id, username, email, status, role, created_at as "createdAt"`,
+      [username.trim(), userEmail, passwordHash, targetRole]
+    );
+
+    return res.json(dbRes.rows[0]);
+  } catch (err: any) {
+    let message = err.message || "Failed to create user.";
+    if (err.code === "23505") {
+      message = "An account with this username or email already exists.";
+    }
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message,
+    } as ApiErrorResponse);
+  }
+});
+
 // Admin - Block/Unblock User
 app.post("/api/admin/users/:id/block", async (req: Request, res: Response) => {
   const authUser = await getAuthUser(req);
-  if (!authUser || authUser.role !== "admin") {
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
     return res.status(403).json({
       code: ErrorCode.FORBIDDEN,
       message: "Access denied. Admin privileges required.",
@@ -492,6 +536,18 @@ app.post("/api/admin/users/:id/block", async (req: Request, res: Response) => {
       code: ErrorCode.ACTION_NOT_ALLOWED,
       message: "You cannot change your own admin account status.",
     } as ApiErrorResponse);
+  }
+
+  // Check target user protection
+  const targetUserCheck = await query<UserDto>("SELECT id, username, role FROM users WHERE id = $1", [id]);
+  if (targetUserCheck.rows.length > 0) {
+    const target = targetUserCheck.rows[0];
+    if (target.role === "super_admin" || target.username.toLowerCase() === "inferno") {
+      return res.status(400).json({
+        code: ErrorCode.ACTION_NOT_ALLOWED,
+        message: "Superuser (Inferno) account is protected and cannot be blocked.",
+      } as ApiErrorResponse);
+    }
   }
 
   try {
@@ -522,7 +578,7 @@ app.post("/api/admin/users/:id/block", async (req: Request, res: Response) => {
 // Admin - Delete User (Sends email notification)
 app.delete("/api/admin/users/:id", async (req: Request, res: Response) => {
   const authUser = await getAuthUser(req);
-  if (!authUser || authUser.role !== "admin") {
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
     return res.status(403).json({
       code: ErrorCode.FORBIDDEN,
       message: "Access denied. Admin privileges required.",
@@ -536,6 +592,18 @@ app.delete("/api/admin/users/:id", async (req: Request, res: Response) => {
       code: ErrorCode.ACTION_NOT_ALLOWED,
       message: "You cannot delete your own admin account.",
     } as ApiErrorResponse);
+  }
+
+  // Check target user protection
+  const targetUserCheck = await query<UserDto>("SELECT id, username, role FROM users WHERE id = $1", [id]);
+  if (targetUserCheck.rows.length > 0) {
+    const target = targetUserCheck.rows[0];
+    if (target.role === "super_admin" || target.username.toLowerCase() === "inferno") {
+      return res.status(400).json({
+        code: ErrorCode.ACTION_NOT_ALLOWED,
+        message: "Superuser (Inferno) account is protected and cannot be deleted.",
+      } as ApiErrorResponse);
+    }
   }
 
   try {
@@ -557,7 +625,9 @@ app.delete("/api/admin/users/:id", async (req: Request, res: Response) => {
     const senderEmail = "admin@project-inferno.com";
     const subject = "Account Deletion Notification";
 
-    await logEmailSent(deletedUser.email, senderEmail, subject, "success");
+    if (deletedUser.email) {
+      await logEmailSent(deletedUser.email, senderEmail, subject, "success");
+    }
 
     console.log("=================================================");
     console.log(`[MOCK EMAIL SERVICE] ${subject} sent to ${deletedUser.email}`);
@@ -575,11 +645,165 @@ app.delete("/api/admin/users/:id", async (req: Request, res: Response) => {
   }
 });
 
-// Worlds Route
-app.get("/api/worlds", async (_req: Request, res: Response) => {
+// Admin - Schedule/Create New World
+app.post("/api/admin/worlds", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { name, startsAt, maxPlayers, status } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "World name is required.",
+    } as ApiErrorResponse);
+  }
+
+  const initialStatus: WorldStageStatus = status || "planned_open";
+  const capacity = maxPlayers && maxPlayers > 0 ? maxPlayers : 100;
+  const startDate = startsAt ? new Date(startsAt) : new Date();
+
   try {
-    const dbRes = await query<WorldDto>(
-      "SELECT id, name, status, created_at as \"createdAt\" FROM worlds"
+    const dbRes = await query(
+      `INSERT INTO worlds (name, status, starts_at, max_players)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, status, starts_at as "startsAt", max_players as "maxPlayers", created_at as "createdAt"`,
+      [name.trim(), initialStatus, startDate, capacity]
+    );
+    return res.json(dbRes.rows[0]);
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// Admin - Update World Stage Status
+app.patch("/api/admin/worlds/:id/status", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const validStatuses: WorldStageStatus[] = ["planned_open", "planned_closed", "active", "active_closed", "suspended", "archived"];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: `Invalid world stage status. Must be one of: ${validStatuses.join(", ")}`,
+    } as ApiErrorResponse);
+  }
+
+  try {
+    const dbRes = await query(
+      `UPDATE worlds
+       SET status = $1
+       WHERE id = $2
+       RETURNING id, name, status, starts_at as "startsAt", max_players as "maxPlayers", created_at as "createdAt"`,
+      [status, id]
+    );
+
+    if (dbRes.rows.length === 0) {
+      return res.status(404).json({
+        code: ErrorCode.NOT_FOUND,
+        message: "World not found.",
+      } as ApiErrorResponse);
+    }
+
+    return res.json(dbRes.rows[0]);
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// World Reservation Endpoints
+app.post("/api/worlds/:id/reserve", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
+    return res.status(401).json({
+      code: ErrorCode.UNAUTHORIZED,
+      message: "Must be logged in to reserve a slot.",
+    } as ApiErrorResponse);
+  }
+
+  const { id } = req.params;
+
+  try {
+    const worldRes = await query("SELECT id, status, max_players as \"maxPlayers\" FROM worlds WHERE id = $1", [id]);
+    if (worldRes.rows.length === 0) {
+      return res.status(404).json({ code: ErrorCode.NOT_FOUND, message: "World not found." } as ApiErrorResponse);
+    }
+
+    const world = worldRes.rows[0];
+    if (world.status !== "planned_open") {
+      return res.status(400).json({
+        code: ErrorCode.ACTION_NOT_ALLOWED,
+        message: "Reservations are only open for worlds in 'planned_open' status.",
+      } as ApiErrorResponse);
+    }
+
+    const countRes = await query("SELECT COUNT(*)::int as count FROM world_reservations WHERE world_id = $1", [id]);
+    if (countRes.rows[0].count >= world.maxPlayers) {
+      return res.status(400).json({
+        code: ErrorCode.ACTION_NOT_ALLOWED,
+        message: "Reservation quota for this world is full.",
+      } as ApiErrorResponse);
+    }
+
+    await query("INSERT INTO world_reservations (world_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [id, authUser.id]);
+    return res.json({ message: "Successfully reserved a spot for this game world!" });
+  } catch (err: any) {
+    return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
+  }
+});
+
+app.delete("/api/worlds/:id/reserve", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
+    return res.status(401).json({
+      code: ErrorCode.UNAUTHORIZED,
+      message: "Must be logged in to cancel reservation.",
+    } as ApiErrorResponse);
+  }
+
+  const { id } = req.params;
+
+  try {
+    await query("DELETE FROM world_reservations WHERE world_id = $1 AND user_id = $2", [id, authUser.id]);
+    return res.json({ message: "Reservation canceled successfully." });
+  } catch (err: any) {
+    return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
+  }
+});
+
+// Worlds Route
+app.get("/api/worlds", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  try {
+    const dbRes = await query(
+      `SELECT w.id, w.name, w.status, w.starts_at as "startsAt", w.max_players as "maxPlayers", w.created_at as "createdAt",
+              COALESCE(r.reserved_count, 0)::int as "reservedCount",
+              CASE WHEN my_r.user_id IS NOT NULL THEN true ELSE false END as "isReservedByMe"
+       FROM worlds w
+       LEFT JOIN (
+         SELECT world_id, COUNT(*) as reserved_count FROM world_reservations GROUP BY world_id
+       ) r ON w.id = r.world_id
+       LEFT JOIN world_reservations my_r ON w.id = my_r.world_id AND my_r.user_id = $1
+       ORDER BY w.created_at DESC`,
+      [authUser?.id || null]
     );
     return res.json(dbRes.rows);
   } catch (err: any) {
