@@ -1,5 +1,5 @@
 import React from "react";
-import { UserDto, WorldDto, EmailLogDto, WorldStageStatus } from "@project-inferno/contracts";
+import { UserDto, WorldDto, EmailLogDto, WorldStageStatus, WorldLogDto } from "@project-inferno/contracts";
 import { InfernoApiClient } from "@project-inferno/api-client";
 import { RegisterPage } from "./RegisterPage.js";
 import { LoginPage } from "./LoginPage.js";
@@ -26,9 +26,57 @@ export const AccountShell: React.FC<AccountShellProps> = ({
   // Admin state
   const [adminUsers, setAdminUsers] = React.useState<UserDto[]>([]);
   const [emailLogs, setEmailLogs] = React.useState<EmailLogDto[]>([]);
-  const [adminTab, setAdminTab] = React.useState<"accounts" | "createUser" | "worlds" | "emailLogs">("accounts");
+  const [worldLogs, setWorldLogs] = React.useState<WorldLogDto[]>([]);
+  const [adminTab, setAdminTab] = React.useState<"accounts" | "createUser" | "worlds" | "worldLogs" | "emailLogs">("accounts");
   const [adminMessage, setAdminMessage] = React.useState<string | null>(null);
   const [adminError, setAdminError] = React.useState<string | null>(null);
+
+  // Edit world state
+  const [editingWorldId, setEditingWorldId] = React.useState<string | null>(null);
+  const [editStartsAt, setEditStartsAt] = React.useState("");
+  const [editMaxPlayers, setEditMaxPlayers] = React.useState(100);
+
+  const loadWorldLogs = async () => {
+    try {
+      const logs = await apiClient.adminGetWorldLogs();
+      setWorldLogs(logs);
+    } catch (err: any) {
+      setAdminError("Failed to fetch world logs.");
+    }
+  };
+
+  const handleAdminUpdateWorldDetails = async (worldId: string) => {
+    setAdminMessage(null);
+    setAdminError(null);
+    try {
+      await apiClient.adminUpdateWorldDetails(worldId, {
+        startsAt: editStartsAt ? new Date(editStartsAt).toISOString() : undefined,
+        maxPlayers: editMaxPlayers,
+      });
+      setAdminMessage("World schedule and capacity limit updated successfully.");
+      setEditingWorldId(null);
+      await loadWorlds();
+      await loadWorldLogs();
+    } catch (err: any) {
+      setAdminError(err.message || "Failed to update world details.");
+    }
+  };
+
+  const handleAdminDeleteWorld = async (world: WorldDto) => {
+    if (!window.confirm(`Are you sure you want to completely delete world '${world.name}'? Audit logs for this world will be preserved.`)) {
+      return;
+    }
+    setAdminMessage(null);
+    setAdminError(null);
+    try {
+      const res = await apiClient.adminDeleteWorld(world.id);
+      setAdminMessage(res.message);
+      await loadWorlds();
+      await loadWorldLogs();
+    } catch (err: any) {
+      setAdminError(err.message || "Failed to delete world.");
+    }
+  };
 
   // Manual create user form state
   const [newUsername, setNewUsername] = React.useState("");
@@ -183,6 +231,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
       if (currentUser.role === "admin" || currentUser.role === "super_admin") {
         loadAdminUsers();
         loadEmailLogs();
+        loadWorldLogs();
       }
     }
   }, [currentUser]);
@@ -270,6 +319,21 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                 }}
               >
                 World Lifecycle
+              </button>
+              <button
+                onClick={() => { setAdminTab("worldLogs"); loadWorldLogs(); }}
+                style={{
+                  padding: "6px 12px",
+                  background: adminTab === "worldLogs" ? "#f97316" : "#27272a",
+                  color: adminTab === "worldLogs" ? "#000" : "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                }}
+              >
+                World Logs ({worldLogs.length})
               </button>
               <button
                 onClick={() => { setAdminTab("emailLogs"); loadEmailLogs(); }}
@@ -546,24 +610,131 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                           {w.status}
                         </td>
                         <td style={{ padding: "8px" }}>
-                          <select
-                            value={w.status}
-                            onChange={(e) => handleUpdateWorldStatus(w.id, e.target.value as WorldStageStatus)}
-                            style={{ padding: "4px 8px", borderRadius: "4px", background: "#27272a", color: "#fff", border: "1px solid #3f3f46" }}
-                          >
-                            <option value="planned_open">planned_open</option>
-                            <option value="planned_closed">planned_closed</option>
-                            <option value="active">active</option>
-                            <option value="active_closed">active_closed</option>
-                            <option value="suspended">suspended</option>
-                            <option value="archived">archived</option>
-                          </select>
+                          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                            <select
+                              value={w.status}
+                              onChange={(e) => handleUpdateWorldStatus(w.id, e.target.value as WorldStageStatus)}
+                              style={{ padding: "4px 8px", borderRadius: "4px", background: "#27272a", color: "#fff", border: "1px solid #3f3f46" }}
+                            >
+                              <option value="planned_open">planned_open</option>
+                              <option value="planned_closed">planned_closed</option>
+                              <option value="active">active</option>
+                              <option value="active_closed">active_closed</option>
+                              <option value="suspended">suspended</option>
+                              <option value="archived">archived</option>
+                            </select>
+
+                            {w.status !== "archived" && (
+                              <button
+                                onClick={() => {
+                                  setEditingWorldId(editingWorldId === w.id ? null : w.id);
+                                  setEditStartsAt(w.startsAt ? new Date(w.startsAt).toISOString().slice(0, 16) : "");
+                                  setEditMaxPlayers(w.maxPlayers || 100);
+                                }}
+                                style={{ padding: "4px 8px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}
+                              >
+                                {editingWorldId === w.id ? "Cancel Edit" : "Edit Limit/Schedule"}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => handleAdminDeleteWorld(w)}
+                              style={{ padding: "4px 8px", background: "#991b1b", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}
+                            >
+                              Delete World
+                            </button>
+                          </div>
+
+                          {editingWorldId === w.id && (
+                            <div style={{ marginTop: "8px", background: "#18181b", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", display: "flex", gap: "8px", alignItems: "center" }}>
+                              <div>
+                                <label style={{ display: "block", fontSize: "11px" }}>Start Time</label>
+                                <input
+                                  type="datetime-local"
+                                  value={editStartsAt}
+                                  onChange={(e) => setEditStartsAt(e.target.value)}
+                                  style={{ padding: "4px", borderRadius: "4px", background: "#27272a", color: "#fff", border: "1px solid #3f3f46", fontSize: "12px" }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ display: "block", fontSize: "11px" }}>Max Players</label>
+                                <input
+                                  type="number"
+                                  value={editMaxPlayers}
+                                  onChange={(e) => setEditMaxPlayers(parseInt(e.target.value) || 100)}
+                                  min={1}
+                                  style={{ width: "80px", padding: "4px", borderRadius: "4px", background: "#27272a", color: "#fff", border: "1px solid #3f3f46", fontSize: "12px" }}
+                                />
+                              </div>
+                              <button
+                                onClick={() => handleAdminUpdateWorldDetails(w.id)}
+                                style={{ marginTop: "14px", padding: "6px 12px", background: "#166534", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}
+                              >
+                                Save Changes
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            </div>
+          ) : adminTab === "worldLogs" ? (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <span style={{ fontSize: "13px", color: "#a1a1aa" }}>World Audit & History Log</span>
+                <button
+                  onClick={loadWorldLogs}
+                  style={{ padding: "4px 8px", background: "#3f3f46", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}
+                >
+                  Refresh Logs
+                </button>
+              </div>
+              {worldLogs.length === 0 ? (
+                <p style={{ color: "#a1a1aa", fontSize: "14px" }}>No world history logs recorded yet.</p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", color: "#e4e4e7", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ background: "#27272a", textAlign: "left" }}>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>World Name</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Action</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Performed By</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Details</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {worldLogs.map((log) => (
+                        <tr key={log.id} style={{ borderBottom: "1px solid #27272a" }}>
+                          <td style={{ padding: "8px", fontWeight: "bold" }}>{log.worldName}</td>
+                          <td style={{ padding: "8px" }}>
+                            <span style={{
+                              color: log.action === "CREATED" ? "#86efac" : log.action === "DELETED" ? "#fca5a5" : "#fdba74",
+                              fontWeight: "bold",
+                              fontSize: "11px",
+                              padding: "2px 6px",
+                              background: "#27272a",
+                              borderRadius: "4px"
+                            }}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px" }}>{log.performedByUsername}</td>
+                          <td style={{ padding: "8px", color: "#a1a1aa", fontSize: "12px" }}>
+                            {JSON.stringify(log.details)}
+                          </td>
+                          <td style={{ padding: "8px", color: "#a1a1aa" }}>
+                            {new Date(log.createdAt).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : (
             <div>

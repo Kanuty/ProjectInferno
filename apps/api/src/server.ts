@@ -1,11 +1,40 @@
 import express, { Request, Response, NextFunction, Express } from "express";
 import cors from "cors";
 import crypto from "crypto";
-import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto, CheckUsernameResponse, AuthResponse, EmailLogDto, WorldStageStatus } from "@project-inferno/contracts";
+import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto, CheckUsernameResponse, AuthResponse, EmailLogDto, WorldStageStatus, WorldLogDto } from "@project-inferno/contracts";
 import { query, runMigrations, getClient, purgeUnactivatedAccounts } from "@project-inferno/database";
 
 // In-memory fallback email log store if DB table isn't ready
 const memoryEmailLogs: EmailLogDto[] = [];
+const memoryWorldLogs: WorldLogDto[] = [];
+
+async function logWorldAction(
+  worldId: string | null,
+  worldName: string,
+  action: string,
+  performedByUserId: string | null,
+  performedByUsername: string,
+  details: Record<string, unknown> = {}
+): Promise<void> {
+  const createdAt = new Date().toISOString();
+  try {
+    await query(
+      `INSERT INTO world_logs (world_id, world_name, action, performed_by_user_id, performed_by_username, details, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      [worldId, worldName, action, performedByUserId, performedByUsername, JSON.stringify(details)]
+    );
+  } catch (err) {
+    memoryWorldLogs.unshift({
+      id: crypto.randomUUID(),
+      worldId,
+      worldName,
+      action,
+      performedByUsername,
+      details,
+      createdAt,
+    });
+  }
+}
 
 async function logEmailSent(recipientEmail: string, senderEmail: string, subject: string, status: string = "success"): Promise<void> {
   const sentAt = new Date().toISOString();
@@ -684,7 +713,16 @@ app.post("/api/admin/worlds", async (req: Request, res: Response) => {
        RETURNING id, name, status, starts_at as "startsAt", max_players as "maxPlayers", is_test_only as "isTestOnly", auto_close_days as "autoCloseDays", created_at as "createdAt"`,
       [name.trim(), initialStatus, startDate, capacity, testOnly, closeDays]
     );
-    return res.json(dbRes.rows[0]);
+
+    const createdWorld = dbRes.rows[0];
+    await logWorldAction(createdWorld.id, createdWorld.name, "CREATED", authUser.id, authUser.username, {
+      status: createdWorld.status,
+      maxPlayers: createdWorld.maxPlayers,
+      startsAt: createdWorld.startsAt,
+      isTestOnly: createdWorld.isTestOnly,
+    });
+
+    return res.json(createdWorld);
   } catch (err: any) {
     return res.status(500).json({
       code: ErrorCode.INTERNAL_ERROR,
@@ -715,6 +753,15 @@ app.patch("/api/admin/worlds/:id/status", async (req: Request, res: Response) =>
   }
 
   try {
+    const currentWorld = await query("SELECT id, name, status FROM worlds WHERE id = $1", [id]);
+    if (currentWorld.rows.length === 0) {
+      return res.status(404).json({
+        code: ErrorCode.NOT_FOUND,
+        message: "World not found.",
+      } as ApiErrorResponse);
+    }
+
+    const prevWorld = currentWorld.rows[0];
     const dbRes = await query(
       `UPDATE worlds
        SET status = $1
@@ -723,19 +770,156 @@ app.patch("/api/admin/worlds/:id/status", async (req: Request, res: Response) =>
       [status, id]
     );
 
-    if (dbRes.rows.length === 0) {
-      return res.status(404).json({
-        code: ErrorCode.NOT_FOUND,
-        message: "World not found.",
-      } as ApiErrorResponse);
-    }
+    const updatedWorld = dbRes.rows[0];
+    await logWorldAction(updatedWorld.id, updatedWorld.name, "STATUS_CHANGED", authUser.id, authUser.username, {
+      previousStatus: prevWorld.status,
+      newStatus: updatedWorld.status,
+    });
 
-    return res.json(dbRes.rows[0]);
+    return res.json(updatedWorld);
   } catch (err: any) {
     return res.status(500).json({
       code: ErrorCode.INTERNAL_ERROR,
       message: err.message,
     } as ApiErrorResponse);
+  }
+});
+
+// Admin - Update World Schedule / Capacity (For non-archived worlds)
+app.patch("/api/admin/worlds/:id", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { id } = req.params;
+  const { startsAt, maxPlayers } = req.body;
+
+  try {
+    const worldRes = await query("SELECT id, name, status, starts_at as \"startsAt\", max_players as \"maxPlayers\" FROM worlds WHERE id = $1", [id]);
+    if (worldRes.rows.length === 0) {
+      return res.status(404).json({ code: ErrorCode.NOT_FOUND, message: "World not found." } as ApiErrorResponse);
+    }
+
+    const world = worldRes.rows[0];
+    if (world.status === "archived") {
+      return res.status(400).json({
+        code: ErrorCode.ACTION_NOT_ALLOWED,
+        message: "Cannot modify player limit or schedule for an archived world.",
+      } as ApiErrorResponse);
+    }
+
+    const newStartsAt = startsAt ? new Date(startsAt) : world.startsAt;
+    const newMaxPlayers = maxPlayers && maxPlayers > 0 ? maxPlayers : world.maxPlayers;
+
+    const updateRes = await query(
+      `UPDATE worlds
+       SET starts_at = $1, max_players = $2
+       WHERE id = $3
+       RETURNING id, name, status, starts_at as "startsAt", max_players as "maxPlayers", created_at as "createdAt"`,
+      [newStartsAt, newMaxPlayers, id]
+    );
+
+    const updatedWorld = updateRes.rows[0];
+
+    if (maxPlayers && maxPlayers !== world.maxPlayers) {
+      await logWorldAction(updatedWorld.id, updatedWorld.name, "LIMIT_UPDATED", authUser.id, authUser.username, {
+        previousMaxPlayers: world.maxPlayers,
+        newMaxPlayers: updatedWorld.maxPlayers,
+      });
+
+      // Recalculate planned status if reservation limit changed
+      if (updatedWorld.status === "planned_open" || updatedWorld.status === "planned_closed") {
+        const countRes = await query("SELECT COUNT(*)::int as count FROM world_reservations WHERE world_id = $1", [id]);
+        const resCount = countRes.rows[0].count;
+        const targetStatus = resCount >= updatedWorld.maxPlayers ? "planned_closed" : "planned_open";
+        if (targetStatus !== updatedWorld.status) {
+          await query("UPDATE worlds SET status = $1 WHERE id = $2", [targetStatus, id]);
+          updatedWorld.status = targetStatus;
+        }
+      }
+    }
+
+    if (startsAt && new Date(startsAt).getTime() !== new Date(world.startsAt).getTime()) {
+      await logWorldAction(updatedWorld.id, updatedWorld.name, "SCHEDULE_UPDATED", authUser.id, authUser.username, {
+        previousStartsAt: world.startsAt,
+        newStartsAt: updatedWorld.startsAt,
+      });
+    }
+
+    return res.json(updatedWorld);
+  } catch (err: any) {
+    return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
+  }
+});
+
+// Admin - Delete World (Logs action before permanent removal)
+app.delete("/api/admin/worlds/:id", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { id } = req.params;
+
+  try {
+    const worldRes = await query("SELECT id, name, status FROM worlds WHERE id = $1", [id]);
+    if (worldRes.rows.length === 0) {
+      return res.status(404).json({ code: ErrorCode.NOT_FOUND, message: "World not found." } as ApiErrorResponse);
+    }
+
+    const world = worldRes.rows[0];
+
+    // Log deletion action before removing the world row so world_logs table holds ON DELETE SET NULL log
+    await logWorldAction(world.id, world.name, "DELETED", authUser.id, authUser.username, {
+      deletedWorldStatus: world.status,
+    });
+
+    await query("DELETE FROM worlds WHERE id = $1", [id]);
+
+    return res.json({ message: `World '${world.name}' was completely deleted and audit log was preserved.` });
+  } catch (err: any) {
+    return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
+  }
+});
+
+// Admin - Get World Audit Logs
+app.get("/api/admin/world-logs", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || (authUser.role !== "admin" && authUser.role !== "super_admin")) {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  const { worldId } = req.query;
+
+  try {
+    let sql = `SELECT id, world_id as "worldId", world_name as "worldName", action,
+                     performed_by_username as "performedByUsername", details, created_at as "createdAt"
+              FROM world_logs`;
+    const params: any[] = [];
+    if (worldId) {
+      sql += " WHERE world_id = $1";
+      params.push(worldId);
+    }
+    sql += " ORDER BY created_at DESC";
+
+    const dbRes = await query(sql, params);
+    const combinedLogs = [...dbRes.rows, ...memoryWorldLogs].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    return res.json(combinedLogs);
+  } catch {
+    return res.json(memoryWorldLogs);
   }
 });
 

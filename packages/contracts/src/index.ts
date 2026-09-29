@@ -125,6 +125,21 @@ export interface UpdateWorldStatusRequest {
   status: WorldStageStatus;
 }
 
+export interface UpdateWorldDetailsRequest {
+  startsAt?: string;
+  maxPlayers?: number;
+}
+
+export interface WorldLogDto {
+  id: string;
+  worldId?: string | null;
+  worldName: string;
+  action: string;
+  performedByUsername: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface PlayerBaseDto {
   id: string;
   worldId: string;
