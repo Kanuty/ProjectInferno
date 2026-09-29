@@ -84,15 +84,52 @@ export async function processDueEvents() {
 
 let isRunning = true;
 
+export async function processWorldLifecycleTransitions() {
+  const client = await getClient();
+  try {
+    // 1. Activate scheduled worlds whose start time has arrived
+    const activateRes = await client.query(`
+      UPDATE worlds
+      SET status = 'active',
+          auto_close_at = NOW() + (auto_close_days || '20')::TEXT::INTERVAL
+      WHERE (status = 'planned_open' OR status = 'planned_closed')
+        AND starts_at IS NOT NULL AND starts_at <= NOW()
+      RETURNING id, name
+    `);
+
+    for (const w of activateRes.rows) {
+      console.log(`[Worker] Scheduled world '${w.name}' (${w.id}) start time reached -> Transitioned to 'active' status.`);
+    }
+
+    // 2. Automatically transition active worlds to 'active_closed' when auto_close_at duration timer elapses
+    const autoCloseRes = await client.query(`
+      UPDATE worlds
+      SET status = 'active_closed'
+      WHERE status = 'active'
+        AND auto_close_at IS NOT NULL AND auto_close_at <= NOW()
+      RETURNING id, name
+    `);
+
+    for (const w of autoCloseRes.rows) {
+      console.log(`[Worker] Active world '${w.name}' (${w.id}) duration timer elapsed -> Transitioned to 'active_closed' status.`);
+    }
+  } catch (err: any) {
+    console.error("[Worker] World lifecycle transition check failed:", err.message || err);
+  } finally {
+    client.release();
+  }
+}
+
 export async function startWorker() {
   console.log("[Worker] Background event worker started.");
   while (isRunning) {
     try {
       await processDueEvents();
       pollCounter++;
-      // Run account cleanup every 30 polling ticks (~60 seconds)
-      if (pollCounter % 30 === 0) {
+      // Run account cleanup and world lifecycle checks every 15 polling ticks (~30 seconds)
+      if (pollCounter % 15 === 0) {
         await purgeUnactivatedAccounts();
+        await processWorldLifecycleTransitions();
       }
     } catch (err: any) {
       console.error("[Worker] Polling loop error (Database may be unreachable):", err.message || err);

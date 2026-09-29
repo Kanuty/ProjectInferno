@@ -28,9 +28,39 @@ export interface HealthCheckResponse {
 export interface UserDto {
   id: string;
   username: string;
-  email: string;
+  email?: string | null;
   status: "pending_activation" | "active" | "suspended";
+  role?: "super_admin" | "admin" | "tester" | "user";
   createdAt: string;
+}
+
+export interface AdminCreateUserRequest {
+  username: string;
+  passwordHash: string;
+  email?: string;
+  role?: "super_admin" | "admin" | "tester" | "user";
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPasswordHash: string;
+}
+
+export interface AdminBlockUserRequest {
+  status: "active" | "suspended";
+}
+
+export interface EmailLogDto {
+  id: string;
+  recipientEmail: string;
+  senderEmail: string;
+  subject: string;
+  status: string;
+  sentAt: string;
 }
 
 export interface RegisterRequest {
@@ -61,10 +91,52 @@ export interface AuthResponse {
 }
 
 // World & Game Domain Contracts
+export type WorldStageStatus =
+  | "planned_open"
+  | "planned_closed"
+  | "active"
+  | "active_closed"
+  | "suspended"
+  | "archived";
+
 export interface WorldDto {
   id: string;
   name: string;
-  status: "active" | "archived" | "maintenance";
+  status: WorldStageStatus;
+  startsAt?: string | null;
+  maxPlayers?: number;
+  isTestOnly?: boolean;
+  autoCloseDays?: number;
+  reservedCount?: number;
+  isReservedByMe?: boolean;
+  createdAt: string;
+}
+
+export interface CreateWorldRequest {
+  name: string;
+  startsAt?: string;
+  maxPlayers?: number;
+  isTestOnly?: boolean;
+  autoCloseDays?: number;
+  status?: WorldStageStatus;
+}
+
+export interface UpdateWorldStatusRequest {
+  status: WorldStageStatus;
+}
+
+export interface UpdateWorldDetailsRequest {
+  startsAt?: string;
+  maxPlayers?: number;
+}
+
+export interface WorldLogDto {
+  id: string;
+  worldId?: string | null;
+  worldName: string;
+  action: string;
+  performedByUsername: string;
+  details: Record<string, unknown>;
   createdAt: string;
 }
 

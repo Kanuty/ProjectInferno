@@ -11,7 +11,13 @@ import {
   ApiErrorResponse,
   ErrorCode,
   CheckUsernameResponse,
-  ActivateAccountRequest
+  ActivateAccountRequest,
+  EmailLogDto,
+  AdminCreateUserRequest,
+  CreateWorldRequest,
+  WorldStageStatus,
+  WorldLogDto,
+  UpdateWorldDetailsRequest
 } from "@project-inferno/contracts";
 
 export class ApiClientError extends Error {
@@ -133,6 +139,92 @@ export class InfernoApiClient {
     return this.request<GameEventDto>("/api/events", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(token: string, newPasswordHash: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, newPasswordHash }),
+    });
+  }
+
+  async adminGetAllUsers(): Promise<UserDto[]> {
+    return this.request<UserDto[]>("/api/admin/users");
+  }
+
+  async adminBlockUser(userId: string, status: "active" | "suspended"): Promise<UserDto> {
+    return this.request<UserDto>(`/api/admin/users/${userId}/block`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async adminUpdateWorldDetails(worldId: string, data: UpdateWorldDetailsRequest): Promise<WorldDto> {
+    return this.request<WorldDto>(`/api/admin/worlds/${worldId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async adminDeleteWorld(worldId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/worlds/${worldId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async adminGetWorldLogs(worldId?: string): Promise<WorldLogDto[]> {
+    const query = worldId ? `?worldId=${encodeURIComponent(worldId)}` : "";
+    return this.request<WorldLogDto[]>(`/api/admin/world-logs${query}`);
+  }
+
+  async adminDeleteUser(userId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/users/${userId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async adminCreateUser(data: AdminCreateUserRequest): Promise<UserDto> {
+    return this.request<UserDto>("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async adminGetEmailLogs(): Promise<EmailLogDto[]> {
+    return this.request<EmailLogDto[]>("/api/admin/email-logs");
+  }
+
+  async adminCreateWorld(data: CreateWorldRequest): Promise<WorldDto> {
+    return this.request<WorldDto>("/api/admin/worlds", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async adminUpdateWorldStatus(worldId: string, status: WorldStageStatus): Promise<WorldDto> {
+    return this.request<WorldDto>(`/api/admin/worlds/${worldId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async reserveWorldSlot(worldId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/worlds/${worldId}/reserve`, {
+      method: "POST",
+    });
+  }
+
+  async cancelWorldReservation(worldId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/worlds/${worldId}/reserve`, {
+      method: "DELETE",
     });
   }
 }
