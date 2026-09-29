@@ -99,6 +99,43 @@ export type WorldStageStatus =
   | "suspended"
   | "archived";
 
+export type NeutralOrigin =
+  | "GENERATED_INITIAL"
+  | "GENERATED_START_GUARANTEE"
+  | "GENERATED_PERIODIC"
+  | "ABANDONED_PLAYER"
+  | "ADMIN_EVENT";
+
+export type CosmeticTerrainType = "TREE" | "ROCK" | "LAKE" | "MOUNTAIN";
+
+export interface CosmeticFeatureDto {
+  q: number;
+  r: number;
+  type: CosmeticTerrainType;
+}
+
+export interface HexCoordinates {
+  q: number;
+  r: number;
+}
+
+export interface WorldMapConfig {
+  radius: number;
+  seed: string;
+  maxPlayers?: number;
+  worldSpeed: number;
+  armyMinutesPerHex: number;
+  merchantMinutesPerHex: number;
+  minPlayerSeparation: number;
+  guaranteedNeutralsCount: number;
+  guaranteedNeutralsMaxDistance: number;
+  initialNeutralDensity: number;
+  periodicSpawnIntervalDays: number;
+  periodicSpawnCutoffDays: number;
+  periodicSpawnRadiusMin: number;
+  periodicSpawnRadiusMax: number;
+}
+
 export interface WorldDto {
   id: string;
   name: string;
@@ -109,6 +146,7 @@ export interface WorldDto {
   autoCloseDays?: number;
   reservedCount?: number;
   isReservedByMe?: boolean;
+  config?: WorldMapConfig;
   createdAt: string;
 }
 
@@ -119,6 +157,7 @@ export interface CreateWorldRequest {
   isTestOnly?: boolean;
   autoCloseDays?: number;
   status?: WorldStageStatus;
+  config?: Partial<WorldMapConfig>;
 }
 
 export interface UpdateWorldStatusRequest {
@@ -128,6 +167,7 @@ export interface UpdateWorldStatusRequest {
 export interface UpdateWorldDetailsRequest {
   startsAt?: string;
   maxPlayers?: number;
+  config?: Partial<WorldMapConfig>;
 }
 
 export interface WorldLogDto {
@@ -140,20 +180,80 @@ export interface WorldLogDto {
   createdAt: string;
 }
 
-export interface PlayerBaseDto {
+export interface BaseDto {
   id: string;
   worldId: string;
-  userId: string;
+  userId: string | null;
+  ownerUsername?: string | null;
   name: string;
+  q: number;
+  r: number;
   positionX: number;
   positionY: number;
-  resources: {
+  tintRaceId?: string | null;
+  neutralOrigin?: NeutralOrigin | null;
+  points?: number;
+  resources?: {
     amountAtReference: number;
     productionRate: number;
     referenceAt: string;
     capacity: number;
   };
   createdAt: string;
+}
+
+export type PlayerBaseDto = BaseDto;
+
+export interface MapChunkDto {
+  chunkKey: string;
+  qMin: number;
+  qMax: number;
+  rMin: number;
+  rMax: number;
+  settlements: BaseDto[];
+  terrainFeatures: CosmeticFeatureDto[];
+  version: number;
+}
+
+export interface MapOverviewItemDto {
+  id: string;
+  q: number;
+  r: number;
+  positionX: number;
+  positionY: number;
+  userId: string | null;
+  ownerUsername?: string | null;
+  isNeutral: boolean;
+  tintRaceId?: string | null;
+  name: string;
+}
+
+export interface MapOverviewDto {
+  worldId: string;
+  radius: number;
+  settlements: MapOverviewItemDto[];
+}
+
+export interface WorldPreviewResponse {
+  mapConfig: WorldMapConfig;
+  totalHexes: number;
+  initialNeutralsCount: number;
+  candidateStartsCount: number;
+  mapCapacity: number;
+  initialNeutrals: HexCoordinates[];
+  candidateStarts: HexCoordinates[];
+  terrainFeatures: CosmeticFeatureDto[];
+  feasibilityScore: number;
+}
+
+export interface JoinWorldRequest {
+  tintRaceId?: string;
+}
+
+export interface JoinWorldResponse {
+  message: string;
+  playerBase: BaseDto;
+  guaranteedNeutrals: BaseDto[];
 }
 
 export interface CreateGameEventRequest {

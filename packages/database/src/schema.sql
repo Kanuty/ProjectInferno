@@ -22,7 +22,6 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
--- Seed default super user (admin / admin)
 -- Seed default super users (Inferno, admin, admin123)
 INSERT INTO users (username, email, password_hash, role, status)
 VALUES
@@ -47,6 +46,7 @@ CREATE TABLE IF NOT EXISTS worlds (
   is_test_only BOOLEAN NOT NULL DEFAULT false,
   auto_close_days INT NOT NULL DEFAULT 20,
   auto_close_at TIMESTAMP WITH TIME ZONE,
+  map_config JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -55,6 +55,7 @@ ALTER TABLE worlds ADD COLUMN IF NOT EXISTS max_players INT NOT NULL DEFAULT 100
 ALTER TABLE worlds ADD COLUMN IF NOT EXISTS is_test_only BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE worlds ADD COLUMN IF NOT EXISTS auto_close_days INT NOT NULL DEFAULT 20;
 ALTER TABLE worlds ADD COLUMN IF NOT EXISTS auto_close_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE worlds ADD COLUMN IF NOT EXISTS map_config JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE worlds ALTER COLUMN status TYPE VARCHAR(30);
 
 CREATE TABLE IF NOT EXISTS world_reservations (
@@ -68,16 +69,53 @@ CREATE TABLE IF NOT EXISTS world_reservations (
 CREATE TABLE IF NOT EXISTS player_bases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   world_id UUID NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE, -- NULL for neutral bases
   name VARCHAR(100) NOT NULL,
-  position_x INT NOT NULL,
-  position_y INT NOT NULL,
+  q INT NOT NULL DEFAULT 0,
+  r INT NOT NULL DEFAULT 0,
+  position_x INT NOT NULL DEFAULT 0,
+  position_y INT NOT NULL DEFAULT 0,
+  tint_race_id VARCHAR(50),
+  neutral_origin VARCHAR(50),
+  points INT NOT NULL DEFAULT 100,
   resource_amount_at_ref DOUBLE PRECISION NOT NULL DEFAULT 100.0,
   resource_production_rate DOUBLE PRECISION NOT NULL DEFAULT 1.0,
   resource_ref_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   resource_capacity DOUBLE PRECISION NOT NULL DEFAULT 10000.0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT unique_world_position UNIQUE (world_id, position_x, position_y)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE player_bases ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS q INT NOT NULL DEFAULT 0;
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS r INT NOT NULL DEFAULT 0;
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS position_x INT NOT NULL DEFAULT 0;
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS position_y INT NOT NULL DEFAULT 0;
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS tint_race_id VARCHAR(50);
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS neutral_origin VARCHAR(50);
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS points INT NOT NULL DEFAULT 100;
+
+ALTER TABLE player_bases DROP CONSTRAINT IF EXISTS unique_world_position;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'unique_world_qr'
+  ) THEN
+    ALTER TABLE player_bases ADD CONSTRAINT unique_world_qr UNIQUE (world_id, q, r);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_player_bases_world_qr ON player_bases (world_id, q, r);
+CREATE INDEX IF NOT EXISTS idx_player_bases_world_user ON player_bases (world_id, user_id);
+
+CREATE TABLE IF NOT EXISTS neutral_spawn_cycles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  world_id UUID NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+  cycle_number INT NOT NULL,
+  scheduled_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
+  processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT unique_world_cycle UNIQUE (world_id, cycle_number)
 );
 
 CREATE TABLE IF NOT EXISTS game_events (
@@ -92,7 +130,6 @@ CREATE TABLE IF NOT EXISTS game_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_game_events_due ON game_events (status, execute_at) WHERE status = 'PENDING';
-CREATE INDEX IF NOT EXISTS idx_player_bases_world_user ON player_bases (world_id, user_id);
 
 CREATE TABLE IF NOT EXISTS email_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

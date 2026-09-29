@@ -1,239 +1,104 @@
-import React from "react";
-import { InfernoApiClient } from "@project-inferno/api-client";
+import React, { useState } from "react";
 import { UserDto } from "@project-inferno/contracts";
-import { TermsModal } from "./TermsModal.js";
+import { ApiClient } from "@project-inferno/api-client";
 
 interface RegisterPageProps {
-  apiClient: InfernoApiClient;
+  apiClient: ApiClient;
   onSuccess: (user: UserDto) => void;
   onNavigateToLogin: () => void;
 }
 
-export const RegisterPage: React.FC<RegisterPageProps> = ({
-  apiClient,
-  onSuccess,
-  onNavigateToLogin,
-}) => {
-  const [username, setUsername] = React.useState("");
-  const [usernameStatus, setUsernameStatus] = React.useState<{ checking: boolean; available?: boolean; message?: string }>({ checking: false });
-  const [email, setEmail] = React.useState("");
-  const [password, setPassword] = React.useState("");
-  const [confirmPassword, setConfirmPassword] = React.useState("");
-  const [termsAccepted, setTermsAccepted] = React.useState(false);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [successNotice, setSuccessNotice] = React.useState<string | null>(null);
-  const [modalType, setModalType] = React.useState<"terms" | "privacy" | null>(null);
-
-  const handleUsernameBlur = async () => {
-    const trimmed = username.trim();
-    if (trimmed.length < 3) {
-      if (trimmed.length > 0) {
-        setUsernameStatus({ checking: false, available: false, message: "Username must be at least 3 characters long." });
-      } else {
-        setUsernameStatus({ checking: false });
-      }
-      return;
-    }
-
-    setUsernameStatus({ checking: true });
-    try {
-      const res = await apiClient.checkUsername(trimmed);
-      setUsernameStatus({ checking: false, available: res.available, message: res.message });
-    } catch {
-      setUsernameStatus({ checking: false });
-    }
-  };
+export const RegisterPage: React.FC<RegisterPageProps> = ({ apiClient, onSuccess, onNavigateToLogin }) => {
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    if (usernameStatus.available === false) {
-      setError("Please select an available username.");
-      return;
-    }
-
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters long.");
-      return;
-    }
-
-    if (!termsAccepted) {
-      setError("You must accept the Terms of Service and Privacy Policy.");
-      return;
-    }
-
+    setMessage(null);
     setLoading(true);
-    try {
-      const res = await apiClient.register({
-        username: username.trim(),
-        email: email.trim(),
-        passwordHash: password,
-        termsAccepted,
-      });
 
-      if (res.user.status === "pending_activation") {
-        setSuccessNotice(res.message || "Account created! Please check your email for the confirmation link to activate your account before logging in.");
-      } else {
+    try {
+      const res = await apiClient.register({ username, email, passwordHash: password, termsAccepted });
+      setMessage(res.message || "Account registered successfully!");
+      if (res.user && res.user.status === "active") {
         onSuccess(res.user);
       }
     } catch (err: any) {
-      setError(err.message || "Account registration failed. Please try again.");
+      setError(err.message || "Registration failed.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: "440px", margin: "24px auto", padding: "24px", background: "#18181b", borderRadius: "10px", border: "1px solid #27272a", color: "#f4f4f5" }}>
-      <h2 style={{ margin: "0 0 8px 0", color: "#ff922b", textAlign: "center" }}>Create Account</h2>
-      <p style={{ margin: "0 0 20px 0", color: "#a1a1aa", fontSize: "14px", textAlign: "center" }}>
-        Join Project Inferno and forge your empire across persistent dark-fantasy worlds.
-      </p>
+    <div style={{ maxWidth: "400px", margin: "40px auto", padding: "24px", background: "#18181b", borderRadius: "10px", border: "1px solid #27272a", color: "#f8fafc" }}>
+      <h2 style={{ margin: "0 0 16px 0", color: "#f97316" }}>Create Account</h2>
 
-      {successNotice && (
-        <div style={{ padding: "14px", background: "#113827", border: "1px solid #166534", borderRadius: "6px", color: "#86efac", fontSize: "14px", marginBottom: "16px" }}>
-          <p style={{ margin: "0 0 8px 0", fontWeight: "bold" }}>🎉 Account Registration Complete!</p>
-          <p style={{ margin: "0 0 12px 0" }}>{successNotice}</p>
-          <button
-            onClick={onNavigateToLogin}
-            style={{ padding: "8px 16px", background: "#51cf66", color: "#000", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}
-          >
-            Go to Login
-          </button>
-        </div>
-      )}
+      {error && <div style={{ padding: "10px", backgroundColor: "#7f1d1d", color: "#fca5a5", borderRadius: "6px", marginBottom: "16px", fontSize: "14px" }}>{error}</div>}
+      {message && <div style={{ padding: "10px", backgroundColor: "#113827", color: "#86efac", borderRadius: "6px", marginBottom: "16px", fontSize: "14px" }}>{message}</div>}
 
-      {error && (
-        <div style={{ padding: "10px 14px", background: "#3f1315", border: "1px solid #7f1d1d", borderRadius: "6px", color: "#fca5a5", fontSize: "14px", marginBottom: "16px" }}>
-          {error}
-        </div>
-      )}
-
-      {!successNotice && (
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
         <div>
-          <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Username</label>
+          <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Username</label>
           <input
             type="text"
-            placeholder="Choose a player username"
             value={username}
-            onChange={(e) => {
-              setUsername(e.target.value);
-              setUsernameStatus({ checking: false });
-            }}
-            onBlur={handleUsernameBlur}
-            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
+            onChange={(e) => setUsername(e.target.value)}
             required
             minLength={3}
+            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
           />
-          {usernameStatus.checking && <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#a1a1aa" }}>Checking username availability...</p>}
-          {!usernameStatus.checking && usernameStatus.available === true && (
-            <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#86efac" }}>✓ Username is available</p>
-          )}
-          {!usernameStatus.checking && usernameStatus.available === false && (
-            <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#fca5a5" }}>✗ {usernameStatus.message}</p>
-          )}
         </div>
 
         <div>
-          <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Email Address</label>
+          <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Email Address</label>
           <input
             type="email"
-            placeholder="player@domain.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
+            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
           />
         </div>
 
         <div>
-          <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Password</label>
+          <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Password (min 8 characters)</label>
           <input
             type="password"
-            placeholder="At least 8 characters"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
             minLength={8}
+            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
           />
         </div>
 
-        <div>
-          <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Confirm Password</label>
-          <input
-            type="password"
-            placeholder="Re-enter password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
-            required
-            minLength={8}
-          />
-        </div>
-
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginTop: "4px" }}>
-          <input
-            type="checkbox"
-            id="terms"
-            checked={termsAccepted}
-            onChange={(e) => setTermsAccepted(e.target.checked)}
-            style={{ marginTop: "3px", cursor: "pointer" }}
-            required
-          />
-          <label htmlFor="terms" style={{ fontSize: "13px", color: "#d4d4d8", cursor: "pointer" }}>
-            I agree to the{" "}
-            <button
-              type="button"
-              onClick={() => setModalType("terms")}
-              style={{ background: "none", border: "none", padding: 0, color: "#ff922b", textDecoration: "underline", cursor: "pointer", fontSize: "13px" }}
-            >
-              Terms of Service
-            </button>{" "}
-            and{" "}
-            <button
-              type="button"
-              onClick={() => setModalType("privacy")}
-              style={{ background: "none", border: "none", padding: 0, color: "#ff922b", textDecoration: "underline", cursor: "pointer", fontSize: "13px" }}
-            >
-              Privacy Policy
-            </button>.
-          </label>
-        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#cbd5e1", marginTop: "4px" }}>
+          <input type="checkbox" checked={termsAccepted} onChange={(e) => setTermsAccepted(e.target.checked)} required />
+          I accept the Terms of Service & Privacy Policy
+        </label>
 
         <button
           type="submit"
           disabled={loading}
-          style={{ padding: "12px", background: loading ? "#52525b" : "#ff922b", color: "#000", fontWeight: "bold", border: "none", borderRadius: "6px", cursor: loading ? "not-allowed" : "pointer", fontSize: "15px", marginTop: "8px" }}
+          style={{ padding: "12px", backgroundColor: "#f97316", color: "#ffffff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", marginTop: "8px" }}
         >
-          {loading ? "Creating Account..." : "Register Account"}
+          {loading ? "Registering..." : "Register Account"}
         </button>
       </form>
-      )}
 
-      <div style={{ textAlign: "center", marginTop: "20px", borderTop: "1px solid #27272a", paddingTop: "16px" }}>
-        <span style={{ fontSize: "14px", color: "#a1a1aa" }}>Already have an account? </span>
-        <button
-          onClick={onNavigateToLogin}
-          style={{ background: "none", border: "none", color: "#ff922b", cursor: "pointer", fontWeight: "bold", padding: 0, fontSize: "14px" }}
-        >
+      <div style={{ marginTop: "16px", textAlign: "center", fontSize: "14px", color: "#94a3b8" }}>
+        Already have an account?{" "}
+        <button onClick={onNavigateToLogin} style={{ background: "none", border: "none", color: "#38bdf8", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
           Sign In
         </button>
       </div>
-
-      <TermsModal
-        isOpen={modalType !== null}
-        onClose={() => setModalType(null)}
-        documentType={modalType || "terms"}
-      />
     </div>
   );
 };
