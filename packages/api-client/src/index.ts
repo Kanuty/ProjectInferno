@@ -12,7 +12,10 @@ import {
   ErrorCode,
   CheckUsernameResponse,
   ActivateAccountRequest,
-  EmailLogDto
+  EmailLogDto,
+  AdminCreateUserRequest,
+  CreateWorldRequest,
+  WorldStageStatus
 } from "@project-inferno/contracts";
 
 export class ApiClientError extends Error {
@@ -168,7 +171,40 @@ export class InfernoApiClient {
     });
   }
 
+  async adminCreateUser(data: AdminCreateUserRequest): Promise<UserDto> {
+    return this.request<UserDto>("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async adminGetEmailLogs(): Promise<EmailLogDto[]> {
     return this.request<EmailLogDto[]>("/api/admin/email-logs");
+  }
+
+  async adminCreateWorld(data: CreateWorldRequest): Promise<WorldDto> {
+    return this.request<WorldDto>("/api/admin/worlds", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async adminUpdateWorldStatus(worldId: string, status: WorldStageStatus): Promise<WorldDto> {
+    return this.request<WorldDto>(`/api/admin/worlds/${worldId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async reserveWorldSlot(worldId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/worlds/${worldId}/reserve`, {
+      method: "POST",
+    });
+  }
+
+  async cancelWorldReservation(worldId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/worlds/${worldId}/reserve`, {
+      method: "DELETE",
+    });
   }
 }

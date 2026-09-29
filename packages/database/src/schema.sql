@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username VARCHAR(64) UNIQUE NOT NULL,
-  email VARCHAR(255) UNIQUE NOT NULL,
+  email VARCHAR(255) UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   terms_accepted_at TIMESTAMP WITH TIME ZONE,
   status VARCHAR(30) NOT NULL DEFAULT 'pending_activation',
@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Ensure existing database instances get missing columns added
+-- Ensure existing database instances get missing columns/constraint updates added
+ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'pending_activation';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS activation_token VARCHAR(255);
@@ -22,24 +23,40 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMP WITH
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
 -- Seed default super user (admin / admin)
--- Seed default super users (admin / admin and admin123 / admin123)
+-- Seed default super users (Inferno, admin, admin123)
 INSERT INTO users (username, email, password_hash, role, status)
 VALUES
+  ('Inferno', NULL, 'Inferno123', 'super_admin', 'active'),
   ('admin', 'admin@project-inferno.com', 'admin', 'admin', 'active'),
   ('admin123', 'admin123@project-inferno.com', 'admin123', 'admin', 'active')
 ON CONFLICT (username) DO UPDATE SET
-  role = 'admin',
+  role = EXCLUDED.role,
   status = 'active';
 
 -- Case-insensitive unique indexes for strict concurrency protection against duplicate usernames/emails
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_lower_username ON users (LOWER(username));
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_lower_email ON users (LOWER(email));
+DROP INDEX IF EXISTS idx_users_lower_email;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_lower_email ON users (LOWER(email)) WHERE email IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS worlds (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(100) NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  status VARCHAR(30) NOT NULL DEFAULT 'active',
+  starts_at TIMESTAMP WITH TIME ZONE,
+  max_players INT NOT NULL DEFAULT 100,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE worlds ADD COLUMN IF NOT EXISTS starts_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE worlds ADD COLUMN IF NOT EXISTS max_players INT NOT NULL DEFAULT 100;
+ALTER TABLE worlds ALTER COLUMN status TYPE VARCHAR(30);
+
+CREATE TABLE IF NOT EXISTS world_reservations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  world_id UUID NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT unique_world_user_reservation UNIQUE (world_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS player_bases (
