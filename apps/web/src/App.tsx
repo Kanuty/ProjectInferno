@@ -1,11 +1,13 @@
 import React from "react";
 import { UserDto } from "@project-inferno/contracts";
-import { InfernoApiClient } from "@project-inferno/api-client";
+import { ApiClient } from "@project-inferno/api-client";
 import { HealthStatus } from "./components/HealthStatus";
 import { AccountShell } from "./components/AccountShell";
 import { GameShell } from "./components/GameShell";
 
-const apiClient = new InfernoApiClient(import.meta.env.VITE_API_URL || "http://localhost:3000");
+const apiClient = new ApiClient({
+  baseUrl: import.meta.env.VITE_API_URL || "http://localhost:3000",
+});
 
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = React.useState<UserDto | null>(null);
@@ -26,7 +28,7 @@ export const App: React.FC = () => {
 
     if (token) {
       apiClient
-        .activateAccount(token)
+        .activate({ token })
         .then((res) => {
           setActivationMessage(res.message || "Account successfully activated!");
           if (res.user) {
@@ -53,7 +55,7 @@ export const App: React.FC = () => {
     setResetLoading(true);
 
     try {
-      const res = await apiClient.resetPassword(resetToken, newPassword);
+      const res = await apiClient.resetPassword({ token: resetToken, newPasswordHash: newPassword });
       setResetStatusMessage(res.message);
       setResetToken(null);
     } catch (err: any) {
@@ -64,7 +66,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div style={{ maxWidth: "900px", margin: "0 auto", padding: "20px" }}>
+    <div style={{ maxWidth: "1000px", margin: "0 auto", padding: "20px" }}>
       <header style={{ borderBottom: "1px solid #333", paddingBottom: "12px", marginBottom: "20px" }}>
         <h1 style={{ margin: 0, color: "#ff922b" }}>PROJECT INFERNO</h1>
         <p style={{ margin: "4px 0 0 0", color: "#888" }}>Persistent Strategy Game Baseline Architecture</p>
@@ -129,6 +131,7 @@ export const App: React.FC = () => {
         <GameShell
           apiClient={apiClient}
           worldId={activeWorldId}
+          currentUserId={currentUser?.id || ""}
           onExitWorld={() => setActiveWorldId(null)}
         />
       )}

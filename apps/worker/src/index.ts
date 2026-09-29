@@ -1,5 +1,10 @@
 import { getClient, purgeUnactivatedAccounts } from "@project-inferno/database";
-import { calculateResources } from "@project-inferno/game-core";
+import { WorldMapConfig } from "@project-inferno/contracts";
+import {
+  calculateResources,
+  selectPeriodicNeutralSpawnHex,
+  DEFAULT_WORLD_MAP_CONFIG,
+} from "@project-inferno/game-core";
 
 const POLL_INTERVAL_MS = 2000;
 let pollCounter = 0;
@@ -11,7 +16,7 @@ export async function processDueEvents() {
 
     // Claim due events safely using FOR UPDATE SKIP LOCKED
     const claimRes = await client.query(`
-      SELECT id, world_id, event_type, payload
+      SELECT id, world_id, event_type, payload, execute_at
       FROM game_events
       WHERE status = 'PENDING' AND execute_at <= CURRENT_TIMESTAMP
       ORDER BY execute_at ASC
@@ -28,9 +33,8 @@ export async function processDueEvents() {
       console.log(`[Worker] Processing event ${event.id} (${event.event_type}) for world ${event.world_id}`);
 
       try {
-        // Execute event logic using deterministic rules from game-core
         if (event.event_type === "RESOURCE_UPDATE") {
-          const { baseId, targetResource } = event.payload;
+          const { baseId } = event.payload;
           if (baseId) {
             const baseRes = await client.query(
               `SELECT id, resource_amount_at_ref, resource_production_rate, resource_ref_at, resource_capacity
@@ -46,7 +50,7 @@ export async function processDueEvents() {
                 productionRate: Number(base.resource_production_rate),
                 referenceAt: new Date(base.resource_ref_at),
                 effectiveTime: now,
-                capacity: Number(base.resource_capacity)
+                capacity: Number(base.resource_capacity),
               });
 
               await client.query(
@@ -57,19 +61,87 @@ export async function processDueEvents() {
               );
             }
           }
+        } else if (event.event_type === "NEUTRAL_SPAWN_CYCLE") {
+          const worldId = event.world_id;
+          const cycleNumber = Number(event.payload.cycleNumber || 1);
+
+          // Fetch world & map config
+          const worldRes = await client.query(
+            `SELECT id, starts_at, status, map_config FROM worlds WHERE id = $1`,
+            [worldId]
+          );
+
+          if (worldRes.rows.length > 0) {
+            const world = worldRes.rows[0];
+            const mapConfig: WorldMapConfig = { ...DEFAULT_WORLD_MAP_CONFIG, ...world.map_config };
+
+            // Record cycle idempotently in neutral_spawn_cycles table
+            const cycleInsert = await client.query(
+              `INSERT INTO neutral_spawn_cycles (world_id, cycle_number, scheduled_at, status)
+               VALUES ($1, $2, $3, 'COMPLETED')
+               ON CONFLICT (world_id, cycle_number) DO NOTHING
+               RETURNING id`,
+              [worldId, cycleNumber, event.execute_at]
+            );
+
+            // If cycle hasn't been executed yet, run spawning logic per eligible player
+            if (cycleInsert.rows.length > 0) {
+              // Get all distinct players who own at least 1 base
+              const playerUsersRes = await client.query(
+                `SELECT DISTINCT user_id FROM player_bases WHERE world_id = $1 AND user_id IS NOT NULL`,
+                [worldId]
+              );
+
+              // Get all occupied hexes
+              const allBasesRes = await client.query(
+                `SELECT q, r, user_id FROM player_bases WHERE world_id = $1`,
+                [worldId]
+              );
+
+              const occupiedHexes = new Set<string>();
+              for (const b of allBasesRes.rows) {
+                occupiedHexes.add(`${b.q},${b.r}`);
+              }
+
+              for (const playerRow of playerUsersRes.rows) {
+                const userId = playerRow.user_id;
+                const playerBases = allBasesRes.rows.filter((b) => b.user_id === userId);
+
+                const chosenHex = selectPeriodicNeutralSpawnHex(mapConfig, playerBases, occupiedHexes);
+                if (chosenHex) {
+                  await client.query(
+                    `INSERT INTO player_bases (world_id, user_id, name, q, r, neutral_origin, points)
+                     VALUES ($1, NULL, 'Abandoned Village', $2, $3, 'GENERATED_PERIODIC', 100)
+                     ON CONFLICT (world_id, q, r) DO NOTHING`,
+                    [worldId, chosenHex.q, chosenHex.r]
+                  );
+                  occupiedHexes.add(`${chosenHex.q},${chosenHex.r}`);
+                }
+              }
+
+              // Schedule next cycle if within cutoff period Y
+              const startsAtTime = world.starts_at ? new Date(world.starts_at).getTime() : new Date().getTime();
+              const cutoffTime = startsAtTime + mapConfig.periodicSpawnCutoffDays * 86400 * 1000;
+              const nextExecuteAtTime = new Date(event.execute_at).getTime() + mapConfig.periodicSpawnIntervalDays * 86400 * 1000;
+
+              if (nextExecuteAtTime <= cutoffTime) {
+                await client.query(
+                  `INSERT INTO game_events (world_id, event_type, execute_at, payload, status)
+                   VALUES ($1, 'NEUTRAL_SPAWN_CYCLE', $2, $3, 'PENDING')`,
+                  [worldId, new Date(nextExecuteAtTime), JSON.stringify({ worldId, cycleNumber: cycleNumber + 1 })]
+                );
+              }
+            }
+          }
         }
 
         // Mark event COMPLETED
-        await client.query(
-          `UPDATE game_events SET status = 'COMPLETED' WHERE id = $1`,
-          [event.id]
-        );
+        await client.query(`UPDATE game_events SET status = 'COMPLETED' WHERE id = $1`, [event.id]);
       } catch (handlerErr: any) {
         console.error(`[Worker] Failed processing event ${event.id}:`, handlerErr);
-        await client.query(
-          `UPDATE game_events SET status = 'FAILED', retry_count = retry_count + 1 WHERE id = $1`,
-          [event.id]
-        );
+        await client.query(`UPDATE game_events SET status = 'FAILED', retry_count = retry_count + 1 WHERE id = $1`, [
+          event.id,
+        ]);
       }
     }
 
@@ -87,7 +159,6 @@ let isRunning = true;
 export async function processWorldLifecycleTransitions() {
   const client = await getClient();
   try {
-    // 1. Activate scheduled worlds whose start time has arrived
     const activateRes = await client.query(`
       UPDATE worlds
       SET status = 'active',
@@ -101,7 +172,6 @@ export async function processWorldLifecycleTransitions() {
       console.log(`[Worker] Scheduled world '${w.name}' (${w.id}) start time reached -> Transitioned to 'active' status.`);
     }
 
-    // 2. Automatically transition active worlds to 'active_closed' when auto_close_at duration timer elapses
     const autoCloseRes = await client.query(`
       UPDATE worlds
       SET status = 'active_closed'
@@ -126,13 +196,12 @@ export async function startWorker() {
     try {
       await processDueEvents();
       pollCounter++;
-      // Run account cleanup and world lifecycle checks every 15 polling ticks (~30 seconds)
       if (pollCounter % 15 === 0) {
         await purgeUnactivatedAccounts();
         await processWorldLifecycleTransitions();
       }
     } catch (err: any) {
-      console.error("[Worker] Polling loop error (Database may be unreachable):", err.message || err);
+      console.error("[Worker] Polling loop error:", err.message || err);
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
