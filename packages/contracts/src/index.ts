@@ -114,6 +114,7 @@ export interface HexCoordinates {
 export interface WorldMapConfig {
   radius: number;
   seed: string;
+  maxPlayers?: number;
   worldSpeed: number;
   armyMinutesPerHex: number;
   merchantMinutesPerHex: number;
@@ -179,6 +180,8 @@ export interface BaseDto {
   name: string;
   q: number;
   r: number;
+  positionX: number;
+  positionY: number;
   tintRaceId?: string | null;
   neutralOrigin?: NeutralOrigin | null;
   points?: number;
@@ -207,6 +210,8 @@ export interface MapOverviewItemDto {
   id: string;
   q: number;
   r: number;
+  positionX: number;
+  positionY: number;
   userId: string | null;
   ownerUsername?: string | null;
   isNeutral: boolean;
@@ -225,6 +230,7 @@ export interface WorldPreviewResponse {
   totalHexes: number;
   initialNeutralsCount: number;
   candidateStartsCount: number;
+  mapCapacity: number;
   initialNeutrals: HexCoordinates[];
   candidateStarts: HexCoordinates[];
   feasibilityScore: number;

@@ -110,8 +110,8 @@ export async function processDueEvents() {
                 const chosenHex = selectPeriodicNeutralSpawnHex(mapConfig, playerBases, occupiedHexes);
                 if (chosenHex) {
                   await client.query(
-                    `INSERT INTO player_bases (world_id, user_id, name, q, r, neutral_origin, points)
-                     VALUES ($1, NULL, 'Abandoned Village', $2, $3, 'GENERATED_PERIODIC', 100)
+                    `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, neutral_origin, points)
+                     VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, 'GENERATED_PERIODIC', 100)
                      ON CONFLICT (world_id, q, r) DO NOTHING`,
                     [worldId, chosenHex.q, chosenHex.r]
                   );

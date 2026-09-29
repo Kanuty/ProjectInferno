@@ -1,4 +1,4 @@
-import { HexCoordinates, WorldMapConfig, NeutralOrigin } from "@project-inferno/contracts";
+import { HexCoordinates, WorldMapConfig } from "@project-inferno/contracts";
 
 /**
  * Pure resource calculation logic.
@@ -90,6 +90,7 @@ export class HexDistanceService {
 export const DEFAULT_WORLD_MAP_CONFIG: WorldMapConfig = {
   radius: 15,
   seed: "inferno-default-seed",
+  maxPlayers: 100,
   worldSpeed: 1.0,
   armyMinutesPerHex: 10,
   merchantMinutesPerHex: 5,
@@ -108,10 +109,11 @@ export function isWithinRadius(q: number, r: number, radius: number): boolean {
 }
 
 export function getHexesInRadius(radius: number): HexCoordinates[] {
+  const validRadius = Math.max(1, Math.floor(radius));
   const hexes: HexCoordinates[] = [];
-  for (let q = -radius; q <= radius; q++) {
-    const r1 = Math.max(-radius, -q - radius);
-    const r2 = Math.min(radius, -q + radius);
+  for (let q = -validRadius; q <= validRadius; q++) {
+    const r1 = Math.max(-validRadius, -q - validRadius);
+    const r2 = Math.min(validRadius, -q + validRadius);
     for (let r = r1; r <= r2; r++) {
       hexes.push({ q, r });
     }
@@ -137,6 +139,7 @@ export interface WorldMapPreviewResult {
   totalHexes: number;
   initialNeutralsCount: number;
   candidateStartsCount: number;
+  mapCapacity: number;
   initialNeutrals: HexCoordinates[];
   candidateStarts: HexCoordinates[];
   feasibilityScore: number;
@@ -166,7 +169,7 @@ export function generateWorldMapPreview(
   }
 
   // Candidate Player Starts ordered center-outward
-  const candidateStarts: HexCoordinates[] = [];
+  const allCandidateStarts: HexCoordinates[] = [];
   const startHexes = [...allHexes].sort((a, b) => {
     const distA = HexDistanceService.distance(0, 0, a.q, a.r);
     const distB = HexDistanceService.distance(0, 0, b.q, b.r);
@@ -177,18 +180,21 @@ export function generateWorldMapPreview(
     const key = `${candidate.q},${candidate.r}`;
     if (occupiedKeys.has(key)) continue;
 
-    // Check separation from previously selected candidates
-    const tooClose = candidateStarts.some(
+    const tooClose = allCandidateStarts.some(
       (existing) =>
         HexDistanceService.distance(candidate.q, candidate.r, existing.q, existing.r) <
         mapConfig.minPlayerSeparation
     );
     if (!tooClose) {
-      candidateStarts.push(candidate);
+      allCandidateStarts.push(candidate);
     }
   }
 
-  // Evaluate feasibility score: % of candidate starts with >= guaranteedNeutralsCount empty cells within maxDistance
+  const mapCapacity = allCandidateStarts.length;
+  const playerLimit = mapConfig.maxPlayers && mapConfig.maxPlayers > 0 ? mapConfig.maxPlayers : mapCapacity;
+  const candidateStarts = allCandidateStarts.slice(0, playerLimit);
+
+  // Evaluate feasibility score for capped candidate starts
   let feasibleCount = 0;
   for (const candidate of candidateStarts) {
     let emptyCount = 0;
@@ -219,6 +225,7 @@ export function generateWorldMapPreview(
     totalHexes: allHexes.length,
     initialNeutralsCount: initialNeutrals.length,
     candidateStartsCount: candidateStarts.length,
+    mapCapacity,
     initialNeutrals,
     candidateStarts,
     feasibilityScore: Math.round(feasibilityScore * 10) / 10,
@@ -233,7 +240,6 @@ export interface PlayerSpawnSelection {
 
 /**
  * Player Base Spawning Algorithm
- * Finds center-outward candidate P, reserves 2 guaranteed nearby neutrals within distance <= 4.
  */
 export function selectPlayerSpawnHex(
   config: WorldMapConfig,
@@ -243,7 +249,6 @@ export function selectPlayerSpawnHex(
 ): PlayerSpawnSelection | null {
   const allHexes = getHexesInRadius(config.radius);
 
-  // Sort center-outward
   const sortedHexes = [...allHexes].sort((a, b) => {
     const distA = HexDistanceService.distance(0, 0, a.q, a.r);
     const distB = HexDistanceService.distance(0, 0, b.q, b.r);
@@ -256,14 +261,12 @@ export function selectPlayerSpawnHex(
     const candidateKey = `${candidate.q},${candidate.r}`;
     if (occupiedHexes.has(candidateKey)) continue;
 
-    // Check minimum player separation
     const validSeparation = existingPlayerHexes.every(
       (p) =>
         HexDistanceService.distance(candidate.q, candidate.r, p.q, p.r) >= config.minPlayerSeparation
     );
     if (!validSeparation) continue;
 
-    // Count existing qualifying neutrals within distance <= guaranteedNeutralsMaxDistance
     const existingQualifyingNeutrals = existingNeutralsHexes.filter(
       (n) => HexDistanceService.distance(candidate.q, candidate.r, n.q, n.r) <= config.guaranteedNeutralsMaxDistance
     );
@@ -277,7 +280,6 @@ export function selectPlayerSpawnHex(
       };
     }
 
-    // Find candidate empty hexes for guaranteed neutrals near candidate
     const eligibleNeutralCells: HexCoordinates[] = [];
     for (let dq = -config.guaranteedNeutralsMaxDistance; dq <= config.guaranteedNeutralsMaxDistance; dq++) {
       for (let dr = -config.guaranteedNeutralsMaxDistance; dr <= config.guaranteedNeutralsMaxDistance; dr++) {
@@ -294,7 +296,6 @@ export function selectPlayerSpawnHex(
       }
     }
 
-    // Sort eligible neutral cells by distance to candidate (prefer distance 2..3)
     eligibleNeutralCells.sort((a, b) => {
       const distA = HexDistanceService.distance(candidate.q, candidate.r, a.q, a.r);
       const distB = HexDistanceService.distance(candidate.q, candidate.r, b.q, b.r);
@@ -329,7 +330,7 @@ export function selectPlayerSpawnHex(
 }
 
 /**
- * Periodic Neutral Spawning Logic (Every X days until Y)
+ * Periodic Neutral Spawning Logic
  */
 export function selectPeriodicNeutralSpawnHex(
   config: WorldMapConfig,
@@ -339,7 +340,6 @@ export function selectPeriodicNeutralSpawnHex(
 ): HexCoordinates | null {
   if (playerBases.length === 0) return null;
 
-  // Pick a base randomly from the player's bases
   const baseIndex = Math.floor(randomFn() * playerBases.length);
   const centerBase = playerBases[baseIndex];
 

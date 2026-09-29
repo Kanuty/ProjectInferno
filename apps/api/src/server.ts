@@ -6,7 +6,6 @@ import {
   ApiErrorResponse,
   HealthCheckResponse,
   UserDto,
-  WorldDto,
   BaseDto,
   CheckUsernameResponse,
   AuthResponse,
@@ -553,6 +552,7 @@ app.post("/api/admin/worlds", async (req: Request, res: Response) => {
 
   const mapConfig: WorldMapConfig = {
     ...DEFAULT_WORLD_MAP_CONFIG,
+    maxPlayers: capacity,
     ...config,
   };
 
@@ -574,8 +574,8 @@ app.post("/api/admin/worlds", async (req: Request, res: Response) => {
     const preview = generateWorldMapPreview(mapConfig);
     for (const hex of preview.initialNeutrals) {
       await client.query(
-        `INSERT INTO player_bases (world_id, user_id, name, q, r, neutral_origin, points)
-         VALUES ($1, NULL, 'Abandoned Village', $2, $3, 'GENERATED_INITIAL', 100)
+        `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, neutral_origin, points)
+         VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, 'GENERATED_INITIAL', 100)
          ON CONFLICT (world_id, q, r) DO NOTHING`,
         [createdWorld.id, hex.q, hex.r]
       );
@@ -788,15 +788,18 @@ app.post("/api/worlds/:worldId/join", async (req: Request, res: Response) => {
 
     const playerBaseName = `${authUser.username}'s Village`;
     const playerBaseRes = await client.query(
-      `INSERT INTO player_bases (world_id, user_id, name, q, r, tint_race_id, points)
-       VALUES ($1, $2, $3, $4, $5, $6, 100)
+      `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, tint_race_id, points)
+       VALUES ($1, $2, $3, $4, $5, $4, $5, $6, 100)
        RETURNING id, world_id as "worldId", user_id as "userId", name, q, r,
+                 position_x as "positionX", position_y as "positionY",
                  tint_race_id as "tintRaceId", neutral_origin as "neutralOrigin", points, created_at as "createdAt"`,
       [worldId, authUser.id, playerBaseName, spawnSelection.playerHex.q, spawnSelection.playerHex.r, tintRaceId || null]
     );
 
     const playerBase: BaseDto = {
       ...playerBaseRes.rows[0],
+      positionX: playerBaseRes.rows[0].positionX ?? spawnSelection.playerHex.q,
+      positionY: playerBaseRes.rows[0].positionY ?? spawnSelection.playerHex.r,
       ownerUsername: authUser.username,
       resources: {
         amountAtReference: 100,
@@ -810,10 +813,11 @@ app.post("/api/worlds/:worldId/join", async (req: Request, res: Response) => {
     for (let i = 0; i < spawnSelection.guaranteedNeutrals.length; i++) {
       const nHex = spawnSelection.guaranteedNeutrals[i];
       const neutralRes = await client.query(
-        `INSERT INTO player_bases (world_id, user_id, name, q, r, neutral_origin, points)
-         VALUES ($1, NULL, 'Abandoned Village', $2, $3, 'GENERATED_START_GUARANTEE', 100)
+        `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, neutral_origin, points)
+         VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, 'GENERATED_START_GUARANTEE', 100)
          ON CONFLICT (world_id, q, r) DO NOTHING
          RETURNING id, world_id as "worldId", user_id as "userId", name, q, r,
+                   position_x as "positionX", position_y as "positionY",
                    neutral_origin as "neutralOrigin", points, created_at as "createdAt"`,
         [worldId, nHex.q, nHex.r]
       );
@@ -821,6 +825,8 @@ app.post("/api/worlds/:worldId/join", async (req: Request, res: Response) => {
       if (neutralRes.rows.length > 0) {
         guaranteedNeutrals.push({
           ...neutralRes.rows[0],
+          positionX: neutralRes.rows[0].positionX ?? nHex.q,
+          positionY: neutralRes.rows[0].positionY ?? nHex.r,
           ownerUsername: null,
           resources: {
             amountAtReference: 100,
@@ -858,7 +864,8 @@ app.get("/api/worlds/:worldId/map/chunks", async (req: Request, res: Response) =
   try {
     const dbRes = await query(
       `SELECT b.id, b.world_id as "worldId", b.user_id as "userId", u.username as "ownerUsername",
-              b.name, b.q, b.r, b.tint_race_id as "tintRaceId", b.neutral_origin as "neutralOrigin",
+              b.name, b.q, b.r, b.position_x as "positionX", b.position_y as "positionY",
+              b.tint_race_id as "tintRaceId", b.neutral_origin as "neutralOrigin",
               b.points, b.resource_amount_at_ref as "resourceAmountAtRef",
               b.resource_production_rate as "resourceProductionRate",
               b.resource_ref_at as "resourceRefAt", b.resource_capacity as "resourceCapacity",
@@ -877,6 +884,8 @@ app.get("/api/worlds/:worldId/map/chunks", async (req: Request, res: Response) =
       name: row.name,
       q: row.q,
       r: row.r,
+      positionX: row.positionX ?? row.q,
+      positionY: row.positionY ?? row.r,
       tintRaceId: row.tintRaceId,
       neutralOrigin: row.neutralOrigin,
       points: row.points,
@@ -919,7 +928,8 @@ app.get("/api/worlds/:worldId/map/overview", async (req: Request, res: Response)
     const mapConfig: WorldMapConfig = { ...DEFAULT_WORLD_MAP_CONFIG, ...world.map_config };
 
     const dbRes = await query(
-      `SELECT b.id, b.q, b.r, b.user_id as "userId", u.username as "ownerUsername",
+      `SELECT b.id, b.q, b.r, b.position_x as "positionX", b.position_y as "positionY",
+              b.user_id as "userId", u.username as "ownerUsername",
               b.tint_race_id as "tintRaceId", b.name
        FROM player_bases b
        LEFT JOIN users u ON b.user_id = u.id
@@ -931,6 +941,8 @@ app.get("/api/worlds/:worldId/map/overview", async (req: Request, res: Response)
       id: row.id,
       q: row.q,
       r: row.r,
+      positionX: row.positionX ?? row.q,
+      positionY: row.positionY ?? row.r,
       userId: row.userId,
       ownerUsername: row.ownerUsername,
       isNeutral: !row.userId,
@@ -1003,7 +1015,8 @@ app.get("/api/worlds/:worldId/bases", async (req: Request, res: Response) => {
   try {
     const dbRes = await query(
       `SELECT b.id, b.world_id as "worldId", b.user_id as "userId", u.username as "ownerUsername",
-              b.name, b.q, b.r, b.tint_race_id as "tintRaceId", b.neutral_origin as "neutralOrigin",
+              b.name, b.q, b.r, b.position_x as "positionX", b.position_y as "positionY",
+              b.tint_race_id as "tintRaceId", b.neutral_origin as "neutralOrigin",
               b.points, b.resource_amount_at_ref as "resourceAmountAtRef",
               b.resource_production_rate as "resourceProductionRate",
               b.resource_ref_at as "resourceRefAt", b.resource_capacity as "resourceCapacity",
@@ -1022,6 +1035,8 @@ app.get("/api/worlds/:worldId/bases", async (req: Request, res: Response) => {
       name: row.name,
       q: row.q,
       r: row.r,
+      positionX: row.positionX ?? row.q,
+      positionY: row.positionY ?? row.r,
       tintRaceId: row.tintRaceId,
       neutralOrigin: row.neutralOrigin,
       points: row.points,

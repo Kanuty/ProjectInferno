@@ -43,12 +43,13 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const getMapConfig = (): Partial<WorldMapConfig> => ({
-    radius,
-    seed,
+    radius: Math.max(5, radius || 5),
+    seed: seed || "inferno-seed",
+    maxPlayers: Math.max(1, maxPlayers || 100),
     worldSpeed,
     armyMinutesPerHex: armySpeed,
     merchantMinutesPerHex: merchantSpeed,
-    minPlayerSeparation: minSeparation,
+    minPlayerSeparation: Math.max(1, minSeparation || 3),
     guaranteedNeutralsCount: guaranteedNeutrals,
     guaranteedNeutralsMaxDistance: guaranteedMaxDist,
     initialNeutralDensity: initialDensity,
@@ -75,7 +76,7 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
     }
   }, [isOpen]);
 
-  // Render Canvas Minimap Preview
+  // Render Canvas Minimap Preview with scale & NaN safeguards
   useEffect(() => {
     if (!preview || !canvasRef.current) return;
     const canvas = canvasRef.current;
@@ -86,14 +87,13 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
     const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
 
-    // Background hex grid bounds
     ctx.fillStyle = "#1e293b";
     ctx.fillRect(0, 0, width, height);
 
-    const r = preview.mapConfig.radius;
+    const r = Math.max(1, preview.mapConfig.radius || 12);
     const centerX = width / 2;
     const centerY = height / 2;
-    const scale = Math.min(width, height) / (2 * r + 4);
+    const scale = Math.max(1, Math.min(width, height) / (2 * r + 4));
 
     // Draw world radius boundary circle
     ctx.strokeStyle = "#475569";
@@ -104,28 +104,38 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
 
     // Draw initial neutrals (Yellow)
     ctx.fillStyle = "#eab308";
-    for (const neutral of preview.initialNeutrals) {
-      const x = centerX + (neutral.q + neutral.r / 2) * scale * 1.5;
-      const y = centerY + neutral.r * scale * 1.3;
-      ctx.beginPath();
-      ctx.arc(x, y, scale * 0.4, 0, 2 * Math.PI);
-      ctx.fill();
+    if (Array.isArray(preview.initialNeutrals)) {
+      for (const neutral of preview.initialNeutrals) {
+        if (typeof neutral?.q !== "number" || typeof neutral?.r !== "number") continue;
+        const x = centerX + (neutral.q + neutral.r / 2) * scale * 1.5;
+        const y = centerY + neutral.r * scale * 1.3;
+        if (!isNaN(x) && !isNaN(y)) {
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(1, scale * 0.4), 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
     }
 
     // Draw candidate player starts (Cyan/Blue)
     ctx.fillStyle = "#38bdf8";
-    for (const start of preview.candidateStarts) {
-      const x = centerX + (start.q + start.r / 2) * scale * 1.5;
-      const y = centerY + start.r * scale * 1.3;
-      ctx.beginPath();
-      ctx.arc(x, y, scale * 0.5, 0, 2 * Math.PI);
-      ctx.fill();
+    if (Array.isArray(preview.candidateStarts)) {
+      for (const start of preview.candidateStarts) {
+        if (typeof start?.q !== "number" || typeof start?.r !== "number") continue;
+        const x = centerX + (start.q + start.r / 2) * scale * 1.5;
+        const y = centerY + start.r * scale * 1.3;
+        if (!isNaN(x) && !isNaN(y)) {
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(1, scale * 0.5), 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
     }
 
     // Origin Center Marker (Red)
     ctx.fillStyle = "#ef4444";
     ctx.beginPath();
-    ctx.arc(centerX, centerY, scale * 0.6, 0, 2 * Math.PI);
+    ctx.arc(centerX, centerY, Math.max(2, scale * 0.6), 0, 2 * Math.PI);
     ctx.fill();
   }, [preview]);
 
@@ -210,7 +220,7 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
 
               <div>
                 <label style={{ display: "block", fontSize: "0.85rem", color: "#94a3b8" }}>Max Players</label>
-                <input type="number" min="1" value={maxPlayers} onChange={(e) => setMaxPlayers(parseInt(e.target.value))} required style={inputStyle} />
+                <input type="number" min="1" value={maxPlayers} onChange={(e) => setMaxPlayers(parseInt(e.target.value) || 1)} required style={inputStyle} />
               </div>
             </div>
 
@@ -226,7 +236,7 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
 
               <div>
                 <label style={{ display: "block", fontSize: "0.85rem", color: "#94a3b8" }}>Auto Close (Days)</label>
-                <input type="number" min="1" value={autoCloseDays} onChange={(e) => setAutoCloseDays(parseInt(e.target.value))} style={inputStyle} />
+                <input type="number" min="1" value={autoCloseDays} onChange={(e) => setAutoCloseDays(parseInt(e.target.value) || 1)} style={inputStyle} />
               </div>
             </div>
 
@@ -240,7 +250,7 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "0.85rem", color: "#94a3b8" }}>Map Radius (Hexes)</label>
-                <input type="number" min="5" max="50" value={radius} onChange={(e) => setRadius(parseInt(e.target.value))} style={inputStyle} />
+                <input type="number" min="5" max="50" value={radius} onChange={(e) => setRadius(parseInt(e.target.value) || 5)} style={inputStyle} />
               </div>
 
               <div>
@@ -252,24 +262,24 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "0.85rem", color: "#94a3b8" }}>Min Player Separation</label>
-                <input type="number" min="1" max="10" value={minSeparation} onChange={(e) => setMinSeparation(parseInt(e.target.value))} style={inputStyle} />
+                <input type="number" min="1" max="10" value={minSeparation} onChange={(e) => setMinSeparation(parseInt(e.target.value) || 1)} style={inputStyle} />
               </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "0.85rem", color: "#94a3b8" }}>Guaranteed Neutrals</label>
-                <input type="number" min="0" max="5" value={guaranteedNeutrals} onChange={(e) => setGuaranteedNeutrals(parseInt(e.target.value))} style={inputStyle} />
+                <input type="number" min="0" max="5" value={guaranteedNeutrals} onChange={(e) => setGuaranteedNeutrals(parseInt(e.target.value) || 0)} style={inputStyle} />
               </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "0.85rem", color: "#94a3b8" }}>Initial Neutral Density</label>
-                <input type="number" step="0.01" min="0" max="0.2" value={initialDensity} onChange={(e) => setInitialDensity(parseFloat(e.target.value))} style={inputStyle} />
+                <input type="number" step="0.01" min="0" max="0.2" value={initialDensity} onChange={(e) => setInitialDensity(parseFloat(e.target.value) || 0)} style={inputStyle} />
               </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "0.85rem", color: "#94a3b8" }}>Periodic Spawn Interval (Days)</label>
-                <input type="number" min="1" value={periodicInterval} onChange={(e) => setPeriodicInterval(parseInt(e.target.value))} style={inputStyle} />
+                <input type="number" min="1" value={periodicInterval} onChange={(e) => setPeriodicInterval(parseInt(e.target.value) || 1)} style={inputStyle} />
               </div>
             </div>
 
@@ -290,7 +300,7 @@ export const AdminWorldCreationModal: React.FC<AdminWorldCreationModalProps> = (
               <div style={{ width: "100%", backgroundColor: "#1e293b", padding: "12px", borderRadius: "8px", fontSize: "0.85rem", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                 <div><span style={{ color: "#94a3b8" }}>Total Hexes:</span> <strong>{preview.totalHexes}</strong></div>
                 <div><span style={{ color: "#94a3b8" }}>Initial Neutrals:</span> <strong style={{ color: "#eab308" }}>{preview.initialNeutralsCount}</strong></div>
-                <div><span style={{ color: "#94a3b8" }}>Player Starts:</span> <strong style={{ color: "#38bdf8" }}>{preview.candidateStartsCount}</strong></div>
+                <div><span style={{ color: "#94a3b8" }}>Player Limit:</span> <strong style={{ color: "#38bdf8" }}>{preview.candidateStartsCount} / {preview.mapCapacity} cap</strong></div>
                 <div><span style={{ color: "#94a3b8" }}>Feasibility:</span> <strong style={{ color: preview.feasibilityScore >= 90 ? "#4ade80" : "#f87171" }}>{preview.feasibilityScore}%</strong></div>
               </div>
             )}

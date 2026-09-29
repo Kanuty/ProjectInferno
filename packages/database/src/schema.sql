@@ -22,7 +22,6 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
--- Seed default super user (admin / admin)
 -- Seed default super users (Inferno, admin, admin123)
 INSERT INTO users (username, email, password_hash, role, status)
 VALUES
@@ -89,6 +88,8 @@ CREATE TABLE IF NOT EXISTS player_bases (
 ALTER TABLE player_bases ALTER COLUMN user_id DROP NOT NULL;
 ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS q INT NOT NULL DEFAULT 0;
 ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS r INT NOT NULL DEFAULT 0;
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS position_x INT NOT NULL DEFAULT 0;
+ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS position_y INT NOT NULL DEFAULT 0;
 ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS tint_race_id VARCHAR(50);
 ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS neutral_origin VARCHAR(50);
 ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS points INT NOT NULL DEFAULT 100;
