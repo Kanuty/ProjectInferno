@@ -34,12 +34,14 @@ export const AccountShell: React.FC<AccountShellProps> = ({
   const [newUsername, setNewUsername] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
   const [newEmail, setNewEmail] = React.useState("");
-  const [newRole, setNewRole] = React.useState<"user" | "admin" | "super_admin">("user");
+  const [newRole, setNewRole] = React.useState<"user" | "tester" | "admin" | "super_admin">("user");
 
   // Create world form state
   const [newWorldName, setNewWorldName] = React.useState("");
   const [newWorldStartsAt, setNewWorldStartsAt] = React.useState("");
   const [newWorldMaxPlayers, setNewWorldMaxPlayers] = React.useState(100);
+  const [newWorldIsTestOnly, setNewWorldIsTestOnly] = React.useState(false);
+  const [newWorldAutoCloseDays, setNewWorldAutoCloseDays] = React.useState(20);
   const [newWorldStatus, setNewWorldStatus] = React.useState<WorldStageStatus>("planned_open");
 
   const handleAdminCreateUser = async (e: React.FormEvent) => {
@@ -73,6 +75,8 @@ export const AccountShell: React.FC<AccountShellProps> = ({
         name: newWorldName.trim(),
         startsAt: newWorldStartsAt ? new Date(newWorldStartsAt).toISOString() : undefined,
         maxPlayers: newWorldMaxPlayers,
+        isTestOnly: newWorldIsTestOnly,
+        autoCloseDays: newWorldAutoCloseDays,
         status: newWorldStatus,
       });
       setAdminMessage(`World '${world.name}' scheduled in '${world.status}' state.`);
@@ -208,9 +212,9 @@ export const AccountShell: React.FC<AccountShellProps> = ({
       <h3 style={{ margin: "0 0 12px 0", color: "#ff922b" }}>Account Dashboard</h3>
       <p style={{ margin: "0 0 16px 0", color: "#e4e4e7" }}>
         Welcome back, <strong style={{ color: "#ff922b" }}>{currentUser.username}</strong> ({currentUser.email || "No Email Associated"})
-        {(currentUser.role === "admin" || currentUser.role === "super_admin") && (
-          <span style={{ marginLeft: "8px", padding: "2px 8px", background: currentUser.role === "super_admin" ? "#991b1b" : "#7c2d12", color: "#fdba74", borderRadius: "4px", fontSize: "12px", fontWeight: "bold" }}>
-            {currentUser.role === "super_admin" ? "SUPER ADMIN" : "ADMIN"}
+        {(currentUser.role === "admin" || currentUser.role === "super_admin" || currentUser.role === "tester") && (
+          <span style={{ marginLeft: "8px", padding: "2px 8px", background: currentUser.role === "super_admin" ? "#991b1b" : currentUser.role === "admin" ? "#7c2d12" : "#1e3a8a", color: "#fdba74", borderRadius: "4px", fontSize: "12px", fontWeight: "bold" }}>
+            {currentUser.role === "super_admin" ? "SUPER ADMIN" : currentUser.role === "admin" ? "ADMIN" : "TESTER"}
           </span>
         )}
       </p>
@@ -417,6 +421,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                     style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
                   >
                     <option value="user">User</option>
+                    <option value="tester">Tester</option>
                     <option value="admin">Admin</option>
                     {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
                   </select>
@@ -464,6 +469,16 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                     />
                   </div>
                   <div>
+                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Auto-Close Timer (Days)</label>
+                    <input
+                      type="number"
+                      value={newWorldAutoCloseDays}
+                      onChange={(e) => setNewWorldAutoCloseDays(parseInt(e.target.value) || 20)}
+                      min={1}
+                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div>
                     <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Initial Stage Status</label>
                     <select
                       value={newWorldStatus}
@@ -477,6 +492,17 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                       <option value="suspended">Suspended (Frozen)</option>
                       <option value="archived">Archived (Closed)</option>
                     </select>
+                  </div>
+                  <div style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input
+                      type="checkbox"
+                      id="isTestOnly"
+                      checked={newWorldIsTestOnly}
+                      onChange={(e) => setNewWorldIsTestOnly(e.target.checked)}
+                    />
+                    <label htmlFor="isTestOnly" style={{ fontSize: "13px", color: "#93c5fd" }}>
+                      <strong>Test-Only World</strong> (Accessible only by tester users, admins, and super admins)
+                    </label>
                   </div>
                   <div style={{ gridColumn: "span 2", marginTop: "8px" }}>
                     <button type="submit" style={{ padding: "8px 16px", background: "#ff922b", color: "#000", fontWeight: "bold", border: "none", borderRadius: "4px", cursor: "pointer" }}>
@@ -597,6 +623,8 @@ export const AccountShell: React.FC<AccountShellProps> = ({
           {worlds.map((w) => {
             const isPlayable = w.status === "active" || w.status === "active_closed";
             const isReservable = w.status === "planned_open";
+            const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
             return (
               <li key={w.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "#27272a", marginBottom: "8px", borderRadius: "6px" }}>
                 <div>
@@ -604,9 +632,14 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                   <span style={{ fontSize: "12px", padding: "2px 6px", background: "#3f3f46", color: "#fdba74", borderRadius: "4px", marginLeft: "6px" }}>
                     Stage: {w.status}
                   </span>
+                  {w.isTestOnly && (
+                    <span style={{ fontSize: "11px", padding: "2px 6px", background: "#1e3a8a", color: "#93c5fd", borderRadius: "4px", marginLeft: "6px", fontWeight: "bold" }}>
+                      TEST-ONLY
+                    </span>
+                  )}
                   {w.startsAt && (
                     <div style={{ fontSize: "12px", color: "#a1a1aa", marginTop: "4px" }}>
-                      Starts At: {new Date(w.startsAt).toLocaleString()}
+                      Starts At: {new Date(w.startsAt).toLocaleString()} ({userTimeZone})
                     </div>
                   )}
                   {w.status.startsWith("planned") && (

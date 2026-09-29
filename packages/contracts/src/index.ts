@@ -30,7 +30,7 @@ export interface UserDto {
   username: string;
   email?: string | null;
   status: "pending_activation" | "active" | "suspended";
-  role?: "super_admin" | "admin" | "user";
+  role?: "super_admin" | "admin" | "tester" | "user";
   createdAt: string;
 }
 
@@ -38,7 +38,7 @@ export interface AdminCreateUserRequest {
   username: string;
   passwordHash: string;
   email?: string;
-  role?: "super_admin" | "admin" | "user";
+  role?: "super_admin" | "admin" | "tester" | "user";
 }
 
 export interface ForgotPasswordRequest {
@@ -105,6 +105,8 @@ export interface WorldDto {
   status: WorldStageStatus;
   startsAt?: string | null;
   maxPlayers?: number;
+  isTestOnly?: boolean;
+  autoCloseDays?: number;
   reservedCount?: number;
   isReservedByMe?: boolean;
   createdAt: string;
@@ -114,6 +116,8 @@ export interface CreateWorldRequest {
   name: string;
   startsAt?: string;
   maxPlayers?: number;
+  isTestOnly?: boolean;
+  autoCloseDays?: number;
   status?: WorldStageStatus;
 }
 
