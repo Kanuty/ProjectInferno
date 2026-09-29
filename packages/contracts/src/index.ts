@@ -106,6 +106,14 @@ export type NeutralOrigin =
   | "ABANDONED_PLAYER"
   | "ADMIN_EVENT";
 
+export type CosmeticTerrainType = "TREE" | "ROCK" | "LAKE" | "MOUNTAIN";
+
+export interface CosmeticFeatureDto {
+  q: number;
+  r: number;
+  type: CosmeticTerrainType;
+}
+
 export interface HexCoordinates {
   q: number;
   r: number;
@@ -203,6 +211,7 @@ export interface MapChunkDto {
   rMin: number;
   rMax: number;
   settlements: BaseDto[];
+  terrainFeatures: CosmeticFeatureDto[];
   version: number;
 }
 
@@ -233,6 +242,7 @@ export interface WorldPreviewResponse {
   mapCapacity: number;
   initialNeutrals: HexCoordinates[];
   candidateStarts: HexCoordinates[];
+  terrainFeatures: CosmeticFeatureDto[];
   feasibilityScore: number;
 }
 

@@ -1,4 +1,4 @@
-import { HexCoordinates, WorldMapConfig } from "@project-inferno/contracts";
+import { HexCoordinates, WorldMapConfig, CosmeticFeatureDto, CosmeticTerrainType } from "@project-inferno/contracts";
 
 /**
  * Pure resource calculation logic.
@@ -142,7 +142,38 @@ export interface WorldMapPreviewResult {
   mapCapacity: number;
   initialNeutrals: HexCoordinates[];
   candidateStarts: HexCoordinates[];
+  terrainFeatures: CosmeticFeatureDto[];
   feasibilityScore: number;
+}
+
+/**
+ * Generate Cosmetic Terrain Features (Trees, Rocks, Lakes, Mountains)
+ */
+export function generateCosmeticTerrainFeatures(
+  config: WorldMapConfig,
+  occupiedHexes: Set<string>
+): CosmeticFeatureDto[] {
+  const rng = createSeededRandom(config.seed + "-terrain");
+  const allHexes = getHexesInRadius(config.radius);
+  const features: CosmeticFeatureDto[] = [];
+  const terrainTypes: CosmeticTerrainType[] = ["TREE", "ROCK", "LAKE", "MOUNTAIN"];
+
+  for (const hex of allHexes) {
+    const key = `${hex.q},${hex.r}`;
+    if (occupiedHexes.has(key)) continue;
+
+    const roll = rng();
+    if (roll < 0.12) {
+      const typeIndex = Math.floor(rng() * terrainTypes.length);
+      features.push({
+        q: hex.q,
+        r: hex.r,
+        type: terrainTypes[typeIndex],
+      });
+    }
+  }
+
+  return features;
 }
 
 /**
@@ -194,6 +225,11 @@ export function generateWorldMapPreview(
   const playerLimit = mapConfig.maxPlayers && mapConfig.maxPlayers > 0 ? mapConfig.maxPlayers : mapCapacity;
   const candidateStarts = allCandidateStarts.slice(0, playerLimit);
 
+  // Generate cosmetic terrain features for empty non-settlement hexes
+  const candidateKeys = new Set(candidateStarts.map((c) => `${c.q},${c.r}`));
+  const reservedForSettlements = new Set([...occupiedKeys, ...candidateKeys]);
+  const terrainFeatures = generateCosmeticTerrainFeatures(mapConfig, reservedForSettlements);
+
   // Evaluate feasibility score for capped candidate starts
   let feasibleCount = 0;
   for (const candidate of candidateStarts) {
@@ -228,6 +264,7 @@ export function generateWorldMapPreview(
     mapCapacity,
     initialNeutrals,
     candidateStarts,
+    terrainFeatures,
     feasibilityScore: Math.round(feasibilityScore * 10) / 10,
   };
 }
