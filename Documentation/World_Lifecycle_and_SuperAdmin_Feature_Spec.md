@@ -8,7 +8,7 @@ Project Inferno provides a top-tier system superuser account (`Inferno`) designe
 ### Key Rules & Constraints
 1. **Credentials & Seeding**:
    - **Username**: `Inferno`
-   - **Password**: `Inferno123`
+   - **Password**: 
    - **Email**: `NULL` (No email address associated or required)
    - **Role**: `super_admin`
    - **Status**: `active`
