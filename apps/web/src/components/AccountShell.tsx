@@ -1,5 +1,5 @@
 import React from "react";
-import { UserDto, WorldDto } from "@project-inferno/contracts";
+import { UserDto, WorldDto, EmailLogDto } from "@project-inferno/contracts";
 import { InfernoApiClient } from "@project-inferno/api-client";
 import { RegisterPage } from "./RegisterPage.js";
 import { LoginPage } from "./LoginPage.js";
@@ -25,6 +25,8 @@ export const AccountShell: React.FC<AccountShellProps> = ({
 
   // Admin state
   const [adminUsers, setAdminUsers] = React.useState<UserDto[]>([]);
+  const [emailLogs, setEmailLogs] = React.useState<EmailLogDto[]>([]);
+  const [adminTab, setAdminTab] = React.useState<"accounts" | "emailLogs">("accounts");
   const [adminMessage, setAdminMessage] = React.useState<string | null>(null);
   const [adminError, setAdminError] = React.useState<string | null>(null);
 
@@ -37,6 +39,15 @@ export const AccountShell: React.FC<AccountShellProps> = ({
     }
   };
 
+  const loadEmailLogs = async () => {
+    try {
+      const logs = await apiClient.adminGetEmailLogs();
+      setEmailLogs(logs);
+    } catch (err: any) {
+      setAdminError("Failed to fetch email logs.");
+    }
+  };
+
   const handleToggleBlockUser = async (user: UserDto) => {
     setAdminMessage(null);
     setAdminError(null);
@@ -45,6 +56,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
       await apiClient.adminBlockUser(user.id, newStatus);
       setAdminMessage(`User ${user.username} is now ${newStatus}.`);
       await loadAdminUsers();
+      await loadEmailLogs();
     } catch (err: any) {
       setAdminError(err.message || "Failed to update user status.");
     }
@@ -60,6 +72,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
       const res = await apiClient.adminDeleteUser(user.id);
       setAdminMessage(res.message);
       await loadAdminUsers();
+      await loadEmailLogs();
     } catch (err: any) {
       setAdminError(err.message || "Failed to delete user.");
     }
@@ -79,6 +92,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
       loadWorlds();
       if (currentUser.role === "admin") {
         loadAdminUsers();
+        loadEmailLogs();
       }
     }
   }, [currentUser]);
@@ -119,7 +133,41 @@ export const AccountShell: React.FC<AccountShellProps> = ({
 
       {currentUser.role === "admin" && (
         <div style={{ marginTop: "20px", marginBottom: "24px", borderTop: "1px solid #27272a", paddingTop: "16px" }}>
-          <h4 style={{ margin: "0 0 12px 0", color: "#f97316" }}>Admin Panel - Account Management</h4>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <h4 style={{ margin: 0, color: "#f97316" }}>Admin Dashboard</h4>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => setAdminTab("accounts")}
+                style={{
+                  padding: "6px 12px",
+                  background: adminTab === "accounts" ? "#f97316" : "#27272a",
+                  color: adminTab === "accounts" ? "#000" : "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                }}
+              >
+                Accounts
+              </button>
+              <button
+                onClick={() => { setAdminTab("emailLogs"); loadEmailLogs(); }}
+                style={{
+                  padding: "6px 12px",
+                  background: adminTab === "emailLogs" ? "#f97316" : "#27272a",
+                  color: adminTab === "emailLogs" ? "#000" : "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                }}
+              >
+                Email Logs ({emailLogs.length})
+              </button>
+            </div>
+          </div>
 
           {adminMessage && (
             <div style={{ padding: "10px 14px", background: "#113827", border: "1px solid #166534", borderRadius: "6px", color: "#86efac", fontSize: "14px", marginBottom: "12px" }}>
@@ -133,76 +181,124 @@ export const AccountShell: React.FC<AccountShellProps> = ({
             </div>
           )}
 
-          {adminUsers.length === 0 ? (
-            <p style={{ color: "#a1a1aa", fontSize: "14px" }}>Loading accounts...</p>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", color: "#e4e4e7", fontSize: "14px" }}>
-                <thead>
-                  <tr style={{ background: "#27272a", textAlign: "left" }}>
-                    <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Username</th>
-                    <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Email</th>
-                    <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Role</th>
-                    <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Status</th>
-                    <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminUsers.map((u) => (
-                    <tr key={u.id} style={{ borderBottom: "1px solid #27272a" }}>
-                      <td style={{ padding: "10px" }}>{u.username}</td>
-                      <td style={{ padding: "10px" }}>{u.email}</td>
-                      <td style={{ padding: "10px" }}>
-                        <span style={{ color: u.role === "admin" ? "#f97316" : "#a1a1aa", fontWeight: u.role === "admin" ? "bold" : "normal" }}>
-                          {u.role || "user"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px" }}>
-                        <span style={{
-                          color: u.status === "active" ? "#86efac" : u.status === "suspended" ? "#fca5a5" : "#fef08a",
-                          fontWeight: "bold"
-                        }}>
-                          {u.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px", display: "flex", gap: "8px" }}>
-                        {u.id !== currentUser.id && (
-                          <>
-                            <button
-                              onClick={() => handleToggleBlockUser(u)}
-                              style={{
-                                padding: "4px 10px",
-                                background: u.status === "suspended" ? "#166534" : "#854d0e",
-                                color: "#fff",
-                                border: "none",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                fontSize: "12px",
-                              }}
-                            >
-                              {u.status === "suspended" ? "Unblock" : "Block"}
-                            </button>
-                            <button
-                              onClick={() => handleDeleteUser(u)}
-                              style={{
-                                padding: "4px 10px",
-                                background: "#991b1b",
-                                color: "#fff",
-                                border: "none",
-                                borderRadius: "4px",
-                                cursor: "pointer",
-                                fontSize: "12px",
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                      </td>
+          {adminTab === "accounts" ? (
+            adminUsers.length === 0 ? (
+              <p style={{ color: "#a1a1aa", fontSize: "14px" }}>Loading accounts...</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", color: "#e4e4e7", fontSize: "14px" }}>
+                  <thead>
+                    <tr style={{ background: "#27272a", textAlign: "left" }}>
+                      <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Username</th>
+                      <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Email</th>
+                      <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Role</th>
+                      <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Status</th>
+                      <th style={{ padding: "10px", borderBottom: "1px solid #3f3f46" }}>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {adminUsers.map((u) => (
+                      <tr key={u.id} style={{ borderBottom: "1px solid #27272a" }}>
+                        <td style={{ padding: "10px" }}>{u.username}</td>
+                        <td style={{ padding: "10px" }}>{u.email}</td>
+                        <td style={{ padding: "10px" }}>
+                          <span style={{ color: u.role === "admin" ? "#f97316" : "#a1a1aa", fontWeight: u.role === "admin" ? "bold" : "normal" }}>
+                            {u.role || "user"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px" }}>
+                          <span style={{
+                            color: u.status === "active" ? "#86efac" : u.status === "suspended" ? "#fca5a5" : "#fef08a",
+                            fontWeight: "bold"
+                          }}>
+                            {u.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px", display: "flex", gap: "8px" }}>
+                          {u.id !== currentUser.id && (
+                            <>
+                              <button
+                                onClick={() => handleToggleBlockUser(u)}
+                                style={{
+                                  padding: "4px 10px",
+                                  background: u.status === "suspended" ? "#166534" : "#854d0e",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  fontSize: "12px",
+                                }}
+                              >
+                                {u.status === "suspended" ? "Unblock" : "Block"}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteUser(u)}
+                                style={{
+                                  padding: "4px 10px",
+                                  background: "#991b1b",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  fontSize: "12px",
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <span style={{ fontSize: "13px", color: "#a1a1aa" }}>System Email Audit Log</span>
+                <button
+                  onClick={loadEmailLogs}
+                  style={{ padding: "4px 8px", background: "#3f3f46", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}
+                >
+                  Refresh Logs
+                </button>
+              </div>
+              {emailLogs.length === 0 ? (
+                <p style={{ color: "#a1a1aa", fontSize: "14px" }}>No email log entries recorded yet.</p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", color: "#e4e4e7", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ background: "#27272a", textAlign: "left" }}>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Recipient Email</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Sender Address</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Subject (Topic)</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Status</th>
+                        <th style={{ padding: "8px", borderBottom: "1px solid #3f3f46" }}>Sent At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {emailLogs.map((log) => (
+                        <tr key={log.id} style={{ borderBottom: "1px solid #27272a" }}>
+                          <td style={{ padding: "8px" }}>{log.recipientEmail}</td>
+                          <td style={{ padding: "8px", color: "#a1a1aa" }}>{log.senderEmail}</td>
+                          <td style={{ padding: "8px", fontWeight: "bold" }}>{log.subject}</td>
+                          <td style={{ padding: "8px" }}>
+                            <span style={{ color: log.status === "success" ? "#86efac" : "#fca5a5", fontWeight: "bold" }}>
+                              {log.status.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px", color: "#a1a1aa" }}>
+                            {new Date(log.sentAt).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>

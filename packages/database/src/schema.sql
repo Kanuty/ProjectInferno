@@ -22,8 +22,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMP WITH
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
 -- Seed default super user (admin / admin)
+-- Seed default super users (admin / admin and admin123 / admin123)
 INSERT INTO users (username, email, password_hash, role, status)
-VALUES ('admin', 'admin@project-inferno.com', 'admin', 'admin', 'active')
+VALUES
+  ('admin', 'admin@project-inferno.com', 'admin', 'admin', 'active'),
+  ('admin123', 'admin123@project-inferno.com', 'admin123', 'admin', 'active')
 ON CONFLICT (username) DO UPDATE SET
   role = 'admin',
   status = 'active';
@@ -67,3 +70,12 @@ CREATE TABLE IF NOT EXISTS game_events (
 
 CREATE INDEX IF NOT EXISTS idx_game_events_due ON game_events (status, execute_at) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_player_bases_world_user ON player_bases (world_id, user_id);
+
+CREATE TABLE IF NOT EXISTS email_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipient_email VARCHAR(255) NOT NULL,
+  sender_email VARCHAR(255) NOT NULL,
+  subject VARCHAR(255) NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'success',
+  sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

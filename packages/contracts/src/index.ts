@@ -47,6 +47,15 @@ export interface AdminBlockUserRequest {
   status: "active" | "suspended";
 }
 
+export interface EmailLogDto {
+  id: string;
+  recipientEmail: string;
+  senderEmail: string;
+  subject: string;
+  status: string;
+  sentAt: string;
+}
+
 export interface RegisterRequest {
   username: string;
   email: string;

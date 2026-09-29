@@ -11,7 +11,8 @@ import {
   ApiErrorResponse,
   ErrorCode,
   CheckUsernameResponse,
-  ActivateAccountRequest
+  ActivateAccountRequest,
+  EmailLogDto
 } from "@project-inferno/contracts";
 
 export class ApiClientError extends Error {
@@ -165,5 +166,9 @@ export class InfernoApiClient {
     return this.request<{ message: string }>(`/api/admin/users/${userId}`, {
       method: "DELETE",
     });
+  }
+
+  async adminGetEmailLogs(): Promise<EmailLogDto[]> {
+    return this.request<EmailLogDto[]>("/api/admin/email-logs");
   }
 }

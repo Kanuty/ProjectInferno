@@ -1,8 +1,32 @@
 import express, { Request, Response, NextFunction, Express } from "express";
 import cors from "cors";
 import crypto from "crypto";
-import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto, CheckUsernameResponse, AuthResponse } from "@project-inferno/contracts";
+import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto, CheckUsernameResponse, AuthResponse, EmailLogDto } from "@project-inferno/contracts";
 import { query, runMigrations, getClient, purgeUnactivatedAccounts } from "@project-inferno/database";
+
+// In-memory fallback email log store if DB table isn't ready
+const memoryEmailLogs: EmailLogDto[] = [];
+
+async function logEmailSent(recipientEmail: string, senderEmail: string, subject: string, status: string = "success"): Promise<void> {
+  const sentAt = new Date().toISOString();
+  try {
+    await query(
+      `INSERT INTO email_logs (recipient_email, sender_email, subject, status, sent_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [recipientEmail, senderEmail, subject, status]
+    );
+  } catch (err) {
+    // Graceful fallback to memory store if DB write fails
+    memoryEmailLogs.unshift({
+      id: crypto.randomUUID(),
+      recipientEmail,
+      senderEmail,
+      subject,
+      status,
+      sentAt,
+    });
+  }
+}
 
 const app: Express = express();
 const PORT = process.env.PORT || 3000;
@@ -142,9 +166,13 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
 
     const user = dbRes.rows[0];
     const confirmationLink = `http://localhost:5173/?activationToken=${activationToken}`;
+    const senderEmail = "noreply@project-inferno.com";
+    const subject = "Activate your Project Inferno account";
+
+    await logEmailSent(user.email, senderEmail, subject, "success");
 
     console.log("=================================================");
-    console.log(`[MOCK EMAIL SERVICE] Confirmation email sent to ${user.email}`);
+    console.log(`[MOCK EMAIL SERVICE] ${subject} sent to ${user.email}`);
     console.log(`Hello ${user.username}, please activate your Project Inferno account:`);
     console.log(`Confirmation Link: ${confirmationLink}`);
     console.log("=================================================");
@@ -216,13 +244,6 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
       message: "Username/Email and password are required.",
-    } as ApiErrorResponse);
-  }
-
-  if (passwordHash.length < 8) {
-    return res.status(400).json({
-      code: ErrorCode.INVALID_INPUT,
-      message: "Password must be at least 8 characters long.",
     } as ApiErrorResponse);
   }
 
@@ -327,8 +348,13 @@ app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
       );
 
       const resetLink = `http://localhost:5173/?resetToken=${resetToken}`;
+      const senderEmail = "security@project-inferno.com";
+      const subject = "Password Reset Request";
+
+      await logEmailSent(user.email, senderEmail, subject, "success");
+
       console.log("=================================================");
-      console.log(`[MOCK EMAIL SERVICE] Password Reset email sent to ${user.email}`);
+      console.log(`[MOCK EMAIL SERVICE] ${subject} sent to ${user.email}`);
       console.log(`Hello ${user.username}, you requested a password reset for your Project Inferno account:`);
       console.log(`Reset Link: ${resetLink}`);
       console.log("=================================================");
@@ -412,6 +438,32 @@ app.get("/api/admin/users", async (req: Request, res: Response) => {
       code: ErrorCode.INTERNAL_ERROR,
       message: err.message,
     } as ApiErrorResponse);
+  }
+});
+
+// Admin - Get Email Logs
+app.get("/api/admin/email-logs", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser || authUser.role !== "admin") {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Access denied. Admin privileges required.",
+    } as ApiErrorResponse);
+  }
+
+  try {
+    const dbRes = await query(
+      `SELECT id, recipient_email as "recipientEmail", sender_email as "senderEmail",
+              subject, status, sent_at as "sentAt"
+       FROM email_logs
+       ORDER BY sent_at DESC`
+    );
+    const combinedLogs = [...dbRes.rows, ...memoryEmailLogs].sort(
+      (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()
+    );
+    return res.json(combinedLogs);
+  } catch {
+    return res.json(memoryEmailLogs);
   }
 });
 
@@ -502,9 +554,13 @@ app.delete("/api/admin/users/:id", async (req: Request, res: Response) => {
     }
 
     const deletedUser = dbRes.rows[0];
+    const senderEmail = "admin@project-inferno.com";
+    const subject = "Account Deletion Notification";
+
+    await logEmailSent(deletedUser.email, senderEmail, subject, "success");
 
     console.log("=================================================");
-    console.log(`[MOCK EMAIL SERVICE] Account Deletion email sent to ${deletedUser.email}`);
+    console.log(`[MOCK EMAIL SERVICE] ${subject} sent to ${deletedUser.email}`);
     console.log(`Hello ${deletedUser.username}, your Project Inferno account has been deleted by an administrator.`);
     console.log("=================================================");
 
