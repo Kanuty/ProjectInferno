@@ -487,7 +487,15 @@ app.post("/api/admin/users", async (req: Request, res: Response) => {
     } as ApiErrorResponse);
   }
 
-  const targetRole = role === "super_admin" && authUser.role === "super_admin" ? "super_admin" : role === "admin" ? "admin" : "user";
+  // Only super_admin can create super_admin users
+  if (role === "super_admin" && authUser.role !== "super_admin") {
+    return res.status(403).json({
+      code: ErrorCode.FORBIDDEN,
+      message: "Only a Super Admin can create other Super Admin accounts.",
+    } as ApiErrorResponse);
+  }
+
+  const targetRole = role === "super_admin" ? "super_admin" : role === "admin" ? "admin" : role === "tester" ? "tester" : "user";
   const userEmail = email && email.trim() ? email.trim().toLowerCase() : null;
 
   try {
@@ -655,7 +663,7 @@ app.post("/api/admin/worlds", async (req: Request, res: Response) => {
     } as ApiErrorResponse);
   }
 
-  const { name, startsAt, maxPlayers, status } = req.body;
+  const { name, startsAt, maxPlayers, status, isTestOnly, autoCloseDays } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
@@ -666,13 +674,15 @@ app.post("/api/admin/worlds", async (req: Request, res: Response) => {
   const initialStatus: WorldStageStatus = status || "planned_open";
   const capacity = maxPlayers && maxPlayers > 0 ? maxPlayers : 100;
   const startDate = startsAt ? new Date(startsAt) : new Date();
+  const testOnly = Boolean(isTestOnly);
+  const closeDays = autoCloseDays && autoCloseDays > 0 ? autoCloseDays : 20;
 
   try {
     const dbRes = await query(
-      `INSERT INTO worlds (name, status, starts_at, max_players)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, name, status, starts_at as "startsAt", max_players as "maxPlayers", created_at as "createdAt"`,
-      [name.trim(), initialStatus, startDate, capacity]
+      `INSERT INTO worlds (name, status, starts_at, max_players, is_test_only, auto_close_days)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, status, starts_at as "startsAt", max_players as "maxPlayers", is_test_only as "isTestOnly", auto_close_days as "autoCloseDays", created_at as "createdAt"`,
+      [name.trim(), initialStatus, startDate, capacity, testOnly, closeDays]
     );
     return res.json(dbRes.rows[0]);
   } catch (err: any) {
@@ -742,12 +752,24 @@ app.post("/api/worlds/:id/reserve", async (req: Request, res: Response) => {
   const { id } = req.params;
 
   try {
-    const worldRes = await query("SELECT id, status, max_players as \"maxPlayers\" FROM worlds WHERE id = $1", [id]);
+    const worldRes = await query("SELECT id, status, max_players as \"maxPlayers\", is_test_only as \"isTestOnly\" FROM worlds WHERE id = $1", [id]);
     if (worldRes.rows.length === 0) {
       return res.status(404).json({ code: ErrorCode.NOT_FOUND, message: "World not found." } as ApiErrorResponse);
     }
 
     const world = worldRes.rows[0];
+
+    // Test-only world check
+    if (world.isTestOnly) {
+      const isTester = authUser.role === "tester" || authUser.role === "admin" || authUser.role === "super_admin";
+      if (!isTester) {
+        return res.status(403).json({
+          code: ErrorCode.FORBIDDEN,
+          message: "This is a test-only world accessible only by test users, admins, and super admins.",
+        } as ApiErrorResponse);
+      }
+    }
+
     if (world.status !== "planned_open") {
       return res.status(400).json({
         code: ErrorCode.ACTION_NOT_ALLOWED,
@@ -756,7 +778,8 @@ app.post("/api/worlds/:id/reserve", async (req: Request, res: Response) => {
     }
 
     const countRes = await query("SELECT COUNT(*)::int as count FROM world_reservations WHERE world_id = $1", [id]);
-    if (countRes.rows[0].count >= world.maxPlayers) {
+    const currentCount = countRes.rows[0].count;
+    if (currentCount >= world.maxPlayers) {
       return res.status(400).json({
         code: ErrorCode.ACTION_NOT_ALLOWED,
         message: "Reservation quota for this world is full.",
@@ -764,6 +787,13 @@ app.post("/api/worlds/:id/reserve", async (req: Request, res: Response) => {
     }
 
     await query("INSERT INTO world_reservations (world_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [id, authUser.id]);
+
+    // Check if max quota is reached after inserting
+    const newCount = currentCount + 1;
+    if (newCount >= world.maxPlayers) {
+      await query("UPDATE worlds SET status = 'planned_closed' WHERE id = $1 AND status = 'planned_open'", [id]);
+    }
+
     return res.json({ message: "Successfully reserved a spot for this game world!" });
   } catch (err: any) {
     return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
@@ -783,6 +813,19 @@ app.delete("/api/worlds/:id/reserve", async (req: Request, res: Response) => {
 
   try {
     await query("DELETE FROM world_reservations WHERE world_id = $1 AND user_id = $2", [id, authUser.id]);
+
+    // Check if slot freed up in planned_closed world
+    const worldRes = await query("SELECT id, status, max_players as \"maxPlayers\" FROM worlds WHERE id = $1", [id]);
+    if (worldRes.rows.length > 0) {
+      const world = worldRes.rows[0];
+      if (world.status === "planned_closed") {
+        const countRes = await query("SELECT COUNT(*)::int as count FROM world_reservations WHERE world_id = $1", [id]);
+        if (countRes.rows[0].count < world.maxPlayers) {
+          await query("UPDATE worlds SET status = 'planned_open' WHERE id = $1", [id]);
+        }
+      }
+    }
+
     return res.json({ message: "Reservation canceled successfully." });
   } catch (err: any) {
     return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
@@ -794,7 +837,8 @@ app.get("/api/worlds", async (req: Request, res: Response) => {
   const authUser = await getAuthUser(req);
   try {
     const dbRes = await query(
-      `SELECT w.id, w.name, w.status, w.starts_at as "startsAt", w.max_players as "maxPlayers", w.created_at as "createdAt",
+      `SELECT w.id, w.name, w.status, w.starts_at as "startsAt", w.max_players as "maxPlayers",
+              w.is_test_only as "isTestOnly", w.auto_close_days as "autoCloseDays", w.created_at as "createdAt",
               COALESCE(r.reserved_count, 0)::int as "reservedCount",
               CASE WHEN my_r.user_id IS NOT NULL THEN true ELSE false END as "isReservedByMe"
        FROM worlds w
@@ -805,7 +849,12 @@ app.get("/api/worlds", async (req: Request, res: Response) => {
        ORDER BY w.created_at DESC`,
       [authUser?.id || null]
     );
-    return res.json(dbRes.rows);
+
+    // Filter out test-only worlds for regular users
+    const isTester = authUser && (authUser.role === "tester" || authUser.role === "admin" || authUser.role === "super_admin");
+    const filteredRows = dbRes.rows.filter((w) => !w.isTestOnly || isTester);
+
+    return res.json(filteredRows);
   } catch (err: any) {
     return res.status(500).json({
       code: ErrorCode.INTERNAL_ERROR,
