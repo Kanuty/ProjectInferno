@@ -93,6 +93,8 @@ ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS tint_race_id VARCHAR(50);
 ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS neutral_origin VARCHAR(50);
 ALTER TABLE player_bases ADD COLUMN IF NOT EXISTS points INT NOT NULL DEFAULT 100;
 
+ALTER TABLE player_bases DROP CONSTRAINT IF EXISTS unique_world_position;
+
 DO $$
 BEGIN
   IF NOT EXISTS (

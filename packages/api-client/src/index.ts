@@ -26,16 +26,31 @@ import {
 
 export interface ApiClientConfig {
   baseUrl: string;
+  token?: string | null;
   getToken?: () => string | null;
 }
 
 export class ApiClient {
   private baseUrl: string;
+  private token: string | null = null;
   private getToken?: () => string | null;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    this.token = config.token || null;
     this.getToken = config.getToken;
+  }
+
+  public setAuthToken(token: string | null): void {
+    this.token = token;
+  }
+
+  public getAuthToken(): string | null {
+    if (this.getToken) {
+      const dynamicToken = this.getToken();
+      if (dynamicToken) return dynamicToken;
+    }
+    return this.token;
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -45,11 +60,9 @@ export class ApiClient {
       ...(options.headers as Record<string, string>),
     };
 
-    if (this.getToken) {
-      const token = this.getToken();
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
+    const token = this.getAuthToken();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
 
     const res = await fetch(url, {
@@ -74,24 +87,36 @@ export class ApiClient {
   }
 
   public async register(req: RegisterRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/auth/register", {
+    const res = await this.request<AuthResponse>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify(req),
     });
+    if (res.token) {
+      this.setAuthToken(res.token);
+    }
+    return res;
   }
 
   public async activate(req: ActivateAccountRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/auth/activate", {
+    const res = await this.request<AuthResponse>("/api/auth/activate", {
       method: "POST",
       body: JSON.stringify(req),
     });
+    if (res.token) {
+      this.setAuthToken(res.token);
+    }
+    return res;
   }
 
   public async login(req: LoginRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>("/api/auth/login", {
+    const res = await this.request<AuthResponse>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify(req),
     });
+    if (res.token) {
+      this.setAuthToken(res.token);
+    }
+    return res;
   }
 
   public async getMe(): Promise<UserDto> {
@@ -156,6 +181,13 @@ export class ApiClient {
     });
   }
 
+  public async adminUpdateWorldDetails(worldId: string, req: UpdateWorldDetailsRequest): Promise<WorldDto> {
+    return this.request<WorldDto>(`/api/admin/worlds/${worldId}`, {
+      method: "PATCH",
+      body: JSON.stringify(req),
+    });
+  }
+
   public async adminUpdateWorldStatus(worldId: string, req: UpdateWorldStatusRequest): Promise<WorldDto> {
     return this.request<WorldDto>(`/api/admin/worlds/${worldId}/status`, {
       method: "PATCH",
@@ -182,6 +214,12 @@ export class ApiClient {
   public async reserveWorldSlot(worldId: string): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/api/worlds/${worldId}/reserve`, {
       method: "POST",
+    });
+  }
+
+  public async cancelWorldReservation(worldId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/worlds/${worldId}/reserve`, {
+      method: "DELETE",
     });
   }
 
