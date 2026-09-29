@@ -102,3 +102,14 @@ CREATE TABLE IF NOT EXISTS email_logs (
   status VARCHAR(50) NOT NULL DEFAULT 'success',
   sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS world_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  world_id UUID REFERENCES worlds(id) ON DELETE SET NULL,
+  world_name VARCHAR(100) NOT NULL,
+  action VARCHAR(50) NOT NULL,
+  performed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  performed_by_username VARCHAR(64) NOT NULL,
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
