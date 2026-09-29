@@ -6,15 +6,21 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   terms_accepted_at TIMESTAMP WITH TIME ZONE,
-  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  status VARCHAR(30) NOT NULL DEFAULT 'pending_activation',
+  activation_token VARCHAR(255),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Ensure existing database instances get missing columns added
 ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP WITH TIME ZONE;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'pending_activation';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS activation_token VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+-- Case-insensitive unique indexes for strict concurrency protection against duplicate usernames/emails
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_lower_username ON users (LOWER(username));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_lower_email ON users (LOWER(email));
 
 CREATE TABLE IF NOT EXISTS worlds (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,7 +1,8 @@
 import express, { Request, Response, NextFunction, Express } from "express";
 import cors from "cors";
-import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto } from "@project-inferno/contracts";
-import { query, runMigrations } from "@project-inferno/database";
+import crypto from "crypto";
+import { ErrorCode, ApiErrorResponse, HealthCheckResponse, UserDto, WorldDto, PlayerBaseDto, CheckUsernameResponse, AuthResponse } from "@project-inferno/contracts";
+import { query, runMigrations, getClient, purgeUnactivatedAccounts } from "@project-inferno/database";
 
 const app: Express = express();
 const PORT = process.env.PORT || 3000;
@@ -29,7 +30,42 @@ app.get("/health", async (_req: Request, res: Response) => {
   res.status(dbStatus === "connected" ? 200 : 503).json(response);
 });
 
-// Auth Routes (Mock/Baseline implementations)
+// Auth Check Username Endpoint (Real-time onBlur check)
+app.get("/api/auth/check-username", async (req: Request, res: Response) => {
+  const username = req.query.username as string;
+  if (!username || username.trim().length < 3) {
+    return res.status(400).json({
+      available: false,
+      message: "Username must be at least 3 characters long.",
+    } as CheckUsernameResponse);
+  }
+
+  try {
+    const dbRes = await query(
+      "SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1",
+      [username.trim()]
+    );
+
+    if (dbRes.rows.length > 0) {
+      return res.json({
+        available: false,
+        message: "Username is already taken.",
+      } as CheckUsernameResponse);
+    }
+
+    return res.json({
+      available: true,
+      message: "Username is available.",
+    } as CheckUsernameResponse);
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// Auth Register Route
 app.post("/api/auth/register", async (req: Request, res: Response) => {
   const { username, email, passwordHash, termsAccepted } = req.body;
 
@@ -48,17 +84,18 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
     } as ApiErrorResponse);
   }
 
-  if (username.trim().length < 3) {
+  const trimmedUsername = username.trim();
+  if (trimmedUsername.length < 3) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
       message: "Username must be at least 3 characters long.",
     } as ApiErrorResponse);
   }
 
-  if (passwordHash.length < 6) {
+  if (passwordHash.length < 8) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
-      message: "Password must be at least 6 characters long.",
+      message: "Password must be at least 8 characters long.",
     } as ApiErrorResponse);
   }
 
@@ -69,41 +106,132 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
     } as ApiErrorResponse);
   }
 
+  const client = await getClient();
   try {
-    const termsAcceptedAt = termsAccepted ? new Date() : null;
-    const dbRes = await query<UserDto>(
-      `INSERT INTO users (username, email, password_hash, terms_accepted_at)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, username, email, created_at as "createdAt"`,
-      [username.trim(), email.trim().toLowerCase(), passwordHash, termsAcceptedAt]
+    await client.query("BEGIN");
+
+    // Concurrency safety check: Acquire explicit lock on potential matching users
+    const existingCheck = await client.query(
+      `SELECT username, email FROM users
+       WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)
+       FOR UPDATE`,
+      [trimmedUsername, email.trim()]
     );
+
+    if (existingCheck.rows.length > 0) {
+      await client.query("ROLLBACK");
+      const existing = existingCheck.rows[0];
+      const field = existing.username.toLowerCase() === trimmedUsername.toLowerCase() ? "username" : "email address";
+      return res.status(400).json({
+        code: ErrorCode.INVALID_INPUT,
+        message: `An account with this ${field} already exists.`,
+      } as ApiErrorResponse);
+    }
+
+    const termsAcceptedAt = termsAccepted ? new Date() : null;
+    const activationToken = crypto.randomBytes(32).toString("hex");
+
+    const dbRes = await client.query<UserDto>(
+      `INSERT INTO users (username, email, password_hash, terms_accepted_at, status, activation_token)
+       VALUES ($1, $2, $3, $4, 'pending_activation', $5)
+       RETURNING id, username, email, status, created_at as "createdAt"`,
+      [trimmedUsername, email.trim().toLowerCase(), passwordHash, termsAcceptedAt, activationToken]
+    );
+
+    await client.query("COMMIT");
+
     const user = dbRes.rows[0];
+    const confirmationLink = `http://localhost:5173/?activationToken=${activationToken}`;
+
+    console.log("=================================================");
+    console.log(`[MOCK EMAIL SERVICE] Confirmation email sent to ${user.email}`);
+    console.log(`Hello ${user.username}, please activate your Project Inferno account:`);
+    console.log(`Confirmation Link: ${confirmationLink}`);
+    console.log("=================================================");
+
     return res.json({
-      token: `mock-jwt-token-${user.id}`,
+      token: "", // Unactivated account does not issue auth token until confirmed
       user,
-    });
+      message: "Account created! A confirmation email has been sent. Please check your inbox and click the confirmation link to activate your account.",
+    } as AuthResponse);
   } catch (err: any) {
+    await client.query("ROLLBACK");
     let message = err.message || "User registration failed.";
     if (err.code === "23505") { // Unique violation in Postgres
-      if (err.constraint?.includes("username")) {
-        message = "A player with this username already exists.";
-      } else if (err.constraint?.includes("email")) {
-        message = "An account with this email address already exists.";
-      }
+      message = "An account with this username or email address already exists.";
     }
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
       message,
     } as ApiErrorResponse);
+  } finally {
+    client.release();
   }
 });
 
-app.post("/api/auth/login", async (req: Request, res: Response) => {
-  const { email, passwordHash } = req.body;
+// Auth Activate Account Route
+app.post("/api/auth/activate", async (req: Request, res: Response) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Activation token is required.",
+    } as ApiErrorResponse);
+  }
+
   try {
-    const dbRes = await query<UserDto & { password_hash: string }>(
-      "SELECT id, username, email, created_at as \"createdAt\", password_hash FROM users WHERE email = $1",
-      [email]
+    const dbRes = await query<UserDto>(
+      `UPDATE users
+       SET status = 'active', activation_token = NULL, updated_at = NOW()
+       WHERE activation_token = $1 AND status = 'pending_activation'
+       RETURNING id, username, email, status, created_at as "createdAt"`,
+      [token]
+    );
+
+    if (dbRes.rows.length === 0) {
+      return res.status(400).json({
+        code: ErrorCode.INVALID_INPUT,
+        message: "Invalid or expired activation link.",
+      } as ApiErrorResponse);
+    }
+
+    const user = dbRes.rows[0];
+    return res.json({
+      token: `mock-jwt-token-${user.id}`,
+      user,
+      message: "Account successfully activated! Welcome to Project Inferno.",
+    } as AuthResponse);
+  } catch (err: any) {
+    return res.status(500).json({
+      code: ErrorCode.INTERNAL_ERROR,
+      message: err.message,
+    } as ApiErrorResponse);
+  }
+});
+
+// Auth Login Route (Supports username OR email address)
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  const { login, passwordHash } = req.body;
+  if (!login || !passwordHash) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Username/Email and password are required.",
+    } as ApiErrorResponse);
+  }
+
+  if (passwordHash.length < 8) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Password must be at least 8 characters long.",
+    } as ApiErrorResponse);
+  }
+
+  try {
+    const dbRes = await query<UserDto & { password_hash: string; status: string }>(
+      `SELECT id, username, email, status, created_at as "createdAt", password_hash
+       FROM users
+       WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)`,
+      [login.trim()]
     );
 
     if (dbRes.rows.length === 0 || dbRes.rows[0].password_hash !== passwordHash) {
@@ -113,7 +241,22 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
       } as ApiErrorResponse);
     }
 
-    const { password_hash, ...user } = dbRes.rows[0];
+    const userRecord = dbRes.rows[0];
+    if (userRecord.status === "pending_activation") {
+      return res.status(403).json({
+        code: ErrorCode.FORBIDDEN,
+        message: "Account is not activated yet. Please click the confirmation link sent to your email.",
+      } as ApiErrorResponse);
+    }
+
+    if (userRecord.status !== "active") {
+      return res.status(403).json({
+        code: ErrorCode.FORBIDDEN,
+        message: "Account is suspended or inactive.",
+      } as ApiErrorResponse);
+    }
+
+    const { password_hash, ...user } = userRecord;
     return res.json({
       token: `mock-jwt-token-${user.id}`,
       user,
