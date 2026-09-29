@@ -43,11 +43,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     e.preventDefault();
     setError(null);
 
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters long.");
-      return;
-    }
-
     setLoading(true);
 
     try {
@@ -93,12 +88,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>Password</label>
           <input
             type="password"
-            placeholder="Your password (min 8 chars)"
+            placeholder="Your password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #3f3f46", background: "#27272a", color: "#fff", boxSizing: "border-box" }}
             required
-            minLength={8}
           />
         </div>
 
