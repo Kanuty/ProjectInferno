@@ -22,6 +22,7 @@ import {
   DEFAULT_WORLD_MAP_CONFIG,
   generateWorldMapPreview,
   selectPlayerSpawnHex,
+  generateCosmeticTerrainFeatures,
 } from "@project-inferno/game-core";
 
 const memoryEmailLogs: EmailLogDto[] = [];
@@ -862,6 +863,9 @@ app.get("/api/worlds/:worldId/map/chunks", async (req: Request, res: Response) =
   const rMax = parseInt(req.query.rMax as string, 10) || 15;
 
   try {
+    const worldRes = await query("SELECT map_config FROM worlds WHERE id = $1", [worldId]);
+    const mapConfig: WorldMapConfig = { ...DEFAULT_WORLD_MAP_CONFIG, ...worldRes.rows[0]?.map_config };
+
     const dbRes = await query(
       `SELECT b.id, b.world_id as "worldId", b.user_id as "userId", u.username as "ownerUsername",
               b.name, b.q, b.r, b.position_x as "positionX", b.position_y as "positionY",
@@ -898,6 +902,13 @@ app.get("/api/worlds/:worldId/map/chunks", async (req: Request, res: Response) =
       createdAt: row.createdAt,
     }));
 
+    // Generate cosmetic terrain features for non-settlement hexes in chunk
+    const occupiedKeys = new Set(settlements.map((s) => `${s.q},${s.r}`));
+    const allTerrainFeatures = generateCosmeticTerrainFeatures(mapConfig, occupiedKeys);
+    const chunkTerrain = allTerrainFeatures.filter(
+      (f) => f.q >= qMin && f.q <= qMax && f.r >= rMin && f.r <= rMax
+    );
+
     const chunkDto: MapChunkDto = {
       chunkKey: `${qMin}_${qMax}_${rMin}_${rMax}`,
       qMin,
@@ -905,6 +916,7 @@ app.get("/api/worlds/:worldId/map/chunks", async (req: Request, res: Response) =
       rMin,
       rMax,
       settlements,
+      terrainFeatures: chunkTerrain,
       version: 1,
     };
 
