@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { BaseDto, CosmeticFeatureDto, MapOverviewDto, WorldDto } from "@project-inferno/contracts";
 import { ApiClient } from "@project-inferno/api-client";
+import { getRaceDefinition } from "@project-inferno/game-core";
 
 interface HexMapViewProps {
   apiClient: ApiClient;
@@ -203,22 +204,29 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
       const isActive = activeBase?.id === base.id;
       const isNeutral = !base.userId;
 
-      // Base Icon Circle Token
+      const raceDef = getRaceDefinition(base.tintRaceId);
+
+      // Base Icon Circle Token with Race Color & Icon
       ctx.beginPath();
-      ctx.arc(x, y, hexRadius * 0.45, 0, 2 * Math.PI);
+      ctx.arc(x, y, hexRadius * 0.48, 0, 2 * Math.PI);
 
       if (isOwn) {
-        ctx.fillStyle = isActive ? "#38bdf8" : "#0284c7";
+        ctx.fillStyle = isActive ? "#38bdf8" : raceDef.ecology.primaryColor;
       } else if (isNeutral) {
-        ctx.fillStyle = "#eab308"; // Yellow dirt/rock neutral base
+        ctx.fillStyle = "#eab308"; // Yellow dirt/rock neutral base (Wearebears)
       } else {
-        ctx.fillStyle = "#ef4444"; // Enemy Player Base
+        ctx.fillStyle = raceDef.ecology.primaryColor || "#ef4444"; // Hostile Player Base
       }
       ctx.fill();
 
-      ctx.strokeStyle = isActive ? "#ffffff" : "#0f172a";
+      ctx.strokeStyle = isActive ? "#ffffff" : isOwn ? "#38bdf8" : "#0f172a";
       ctx.lineWidth = isActive ? 3 : 1.5;
       ctx.stroke();
+
+      // Render Race Icon Emoji inside settlement token
+      ctx.textAlign = "center";
+      ctx.font = `${Math.max(10, hexRadius * 0.5)}px sans-serif`;
+      ctx.fillText(raceDef.icon, x, y + hexRadius * 0.18);
     }
   }, [settlements, terrainFeatures, viewQ, viewR, zoom, activeBase, currentUserId, world]);
 
@@ -360,20 +368,28 @@ export const HexMapView: React.FC<HexMapViewProps> = ({
               <button onClick={() => setSelectedSettlement(null)} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: "1.2rem" }}>&times;</button>
             </div>
 
-            <div style={{ fontSize: "0.85rem", color: "#cbd5e1", display: "flex", flexDirection: "column", gap: "6px" }}>
-              <div>Owner Player: <strong style={{ color: "#38bdf8" }}>{selectedSettlement.ownerUsername || "Neutral / Abandoned"}</strong></div>
-              <div>Village Name: <strong>{selectedSettlement.name}</strong></div>
-              <div>Race / Faction: <strong>{selectedSettlement.tintRaceId || "Human"}</strong></div>
-              <div>Village Points: <strong>{selectedSettlement.points || 100}</strong></div>
-              <div>Coordinates: <strong>({selectedSettlement.q}, {selectedSettlement.r})</strong></div>
-              {activeBase && (
-                <div>
-                  Distance: <strong>
-                    {hexDistance(activeBase.q, activeBase.r, selectedSettlement.q, selectedSettlement.r)} hexes
-                  </strong>
+            {(() => {
+              const selRaceDef = getRaceDefinition(selectedSettlement.tintRaceId);
+              return (
+                <div style={{ fontSize: "0.85rem", color: "#cbd5e1", display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <div>Owner Player: <strong style={{ color: "#38bdf8" }}>{selectedSettlement.ownerUsername || "Neutral / Abandoned"}</strong></div>
+                  <div>Village Name: <strong>{selectedSettlement.name}</strong></div>
+                  <div>
+                    Race / Faction: <strong style={{ color: selRaceDef.ecology.primaryColor }}>{selRaceDef.icon} {selRaceDef.name}</strong>
+                  </div>
+                  <div>Ecology: <em>{selRaceDef.ecology.terrainType}</em></div>
+                  <div>Village Points: <strong>{selectedSettlement.points || 100}</strong></div>
+                  <div>Coordinates: <strong>({selectedSettlement.q}, {selectedSettlement.r})</strong></div>
+                  {activeBase && (
+                    <div>
+                      Distance: <strong>
+                        {hexDistance(activeBase.q, activeBase.r, selectedSettlement.q, selectedSettlement.r)} hexes
+                      </strong>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {selectedSettlement.userId === currentUserId ? (
               <button
