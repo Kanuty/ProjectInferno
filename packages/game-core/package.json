@@ -18,6 +18,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@project-inferno/contracts": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "^5.3.3",
     "vitest": "^1.2.2"

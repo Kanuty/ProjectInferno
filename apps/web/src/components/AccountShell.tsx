@@ -1,11 +1,12 @@
 import React from "react";
 import { UserDto, WorldDto, EmailLogDto, WorldStageStatus, WorldLogDto } from "@project-inferno/contracts";
-import { InfernoApiClient } from "@project-inferno/api-client";
+import { ApiClient } from "@project-inferno/api-client";
 import { RegisterPage } from "./RegisterPage.js";
 import { LoginPage } from "./LoginPage.js";
+import { AdminWorldCreationModal } from "./AdminWorldCreationModal.js";
 
 interface AccountShellProps {
-  apiClient: InfernoApiClient;
+  apiClient: ApiClient;
   currentUser: UserDto | null;
   onLoginSuccess: (user: UserDto) => void;
   onSelectWorld: (worldId: string) => void;
@@ -30,35 +31,14 @@ export const AccountShell: React.FC<AccountShellProps> = ({
   const [adminTab, setAdminTab] = React.useState<"accounts" | "createUser" | "worlds" | "worldLogs" | "emailLogs">("accounts");
   const [adminMessage, setAdminMessage] = React.useState<string | null>(null);
   const [adminError, setAdminError] = React.useState<string | null>(null);
-
-  // Edit world state
-  const [editingWorldId, setEditingWorldId] = React.useState<string | null>(null);
-  const [editStartsAt, setEditStartsAt] = React.useState("");
-  const [editMaxPlayers, setEditMaxPlayers] = React.useState(100);
+  const [isCreationModalOpen, setIsCreationModalOpen] = React.useState(false);
 
   const loadWorldLogs = async () => {
     try {
       const logs = await apiClient.adminGetWorldLogs();
       setWorldLogs(logs);
-    } catch (err: any) {
+    } catch {
       setAdminError("Failed to fetch world logs.");
-    }
-  };
-
-  const handleAdminUpdateWorldDetails = async (worldId: string) => {
-    setAdminMessage(null);
-    setAdminError(null);
-    try {
-      await apiClient.adminUpdateWorldDetails(worldId, {
-        startsAt: editStartsAt ? new Date(editStartsAt).toISOString() : undefined,
-        maxPlayers: editMaxPlayers,
-      });
-      setAdminMessage("World schedule and capacity limit updated successfully.");
-      setEditingWorldId(null);
-      await loadWorlds();
-      await loadWorldLogs();
-    } catch (err: any) {
-      setAdminError(err.message || "Failed to update world details.");
     }
   };
 
@@ -84,14 +64,6 @@ export const AccountShell: React.FC<AccountShellProps> = ({
   const [newEmail, setNewEmail] = React.useState("");
   const [newRole, setNewRole] = React.useState<"user" | "tester" | "admin" | "super_admin">("user");
 
-  // Create world form state
-  const [newWorldName, setNewWorldName] = React.useState("");
-  const [newWorldStartsAt, setNewWorldStartsAt] = React.useState("");
-  const [newWorldMaxPlayers, setNewWorldMaxPlayers] = React.useState(100);
-  const [newWorldIsTestOnly, setNewWorldIsTestOnly] = React.useState(false);
-  const [newWorldAutoCloseDays, setNewWorldAutoCloseDays] = React.useState(20);
-  const [newWorldStatus, setNewWorldStatus] = React.useState<WorldStageStatus>("planned_open");
-
   const handleAdminCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdminMessage(null);
@@ -114,33 +86,11 @@ export const AccountShell: React.FC<AccountShellProps> = ({
     }
   };
 
-  const handleAdminCreateWorld = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminMessage(null);
-    setAdminError(null);
-    try {
-      const world = await apiClient.adminCreateWorld({
-        name: newWorldName.trim(),
-        startsAt: newWorldStartsAt ? new Date(newWorldStartsAt).toISOString() : undefined,
-        maxPlayers: newWorldMaxPlayers,
-        isTestOnly: newWorldIsTestOnly,
-        autoCloseDays: newWorldAutoCloseDays,
-        status: newWorldStatus,
-      });
-      setAdminMessage(`World '${world.name}' scheduled in '${world.status}' state.`);
-      setNewWorldName("");
-      setNewWorldStartsAt("");
-      await loadWorlds();
-    } catch (err: any) {
-      setAdminError(err.message || "Failed to create world.");
-    }
-  };
-
   const handleUpdateWorldStatus = async (worldId: string, status: WorldStageStatus) => {
     setAdminMessage(null);
     setAdminError(null);
     try {
-      await apiClient.adminUpdateWorldStatus(worldId, status);
+      await apiClient.adminUpdateWorldStatus(worldId, { status });
       setAdminMessage(`World status updated to '${status}'.`);
       await loadWorlds();
     } catch (err: any) {
@@ -158,21 +108,11 @@ export const AccountShell: React.FC<AccountShellProps> = ({
     }
   };
 
-  const handleCancelWorldReservation = async (worldId: string) => {
-    try {
-      const res = await apiClient.cancelWorldReservation(worldId);
-      alert(res.message);
-      await loadWorlds();
-    } catch (err: any) {
-      alert(err.message || "Failed to cancel reservation.");
-    }
-  };
-
   const loadAdminUsers = async () => {
     try {
-      const users = await apiClient.adminGetAllUsers();
+      const users = await apiClient.adminGetUsers();
       setAdminUsers(users);
-    } catch (err: any) {
+    } catch {
       setAdminError("Failed to fetch user accounts.");
     }
   };
@@ -181,7 +121,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
     try {
       const logs = await apiClient.adminGetEmailLogs();
       setEmailLogs(logs);
-    } catch (err: any) {
+    } catch {
       setAdminError("Failed to fetch email logs.");
     }
   };
@@ -191,7 +131,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
     setAdminError(null);
     const newStatus = user.status === "suspended" ? "active" : "suspended";
     try {
-      await apiClient.adminBlockUser(user.id, newStatus);
+      await apiClient.adminBlockUser(user.id, { status: newStatus });
       setAdminMessage(`User ${user.username} is now ${newStatus}.`);
       await loadAdminUsers();
       await loadEmailLogs();
@@ -201,7 +141,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
   };
 
   const handleDeleteUser = async (user: UserDto) => {
-    if (!window.confirm(`Are you sure you want to delete user ${user.username} (${user.email})? An email notification will be sent.`)) {
+    if (!window.confirm(`Are you sure you want to delete user ${user.username}? An email notification will be sent.`)) {
       return;
     }
     setAdminMessage(null);
@@ -220,7 +160,7 @@ export const AccountShell: React.FC<AccountShellProps> = ({
     try {
       const data = await apiClient.getWorlds();
       setWorlds(data);
-    } catch (err: any) {
+    } catch {
       setError("Failed to fetch game worlds.");
     }
   };
@@ -258,6 +198,16 @@ export const AccountShell: React.FC<AccountShellProps> = ({
 
   return (
     <div style={{ padding: "20px", background: "#18181b", borderRadius: "10px", border: "1px solid #27272a", marginBottom: "16px" }}>
+      <AdminWorldCreationModal
+        apiClient={apiClient}
+        isOpen={isCreationModalOpen}
+        onClose={() => setIsCreationModalOpen(false)}
+        onWorldCreated={() => {
+          loadWorlds();
+          loadWorldLogs();
+        }}
+      />
+
       <h3 style={{ margin: "0 0 12px 0", color: "#ff922b" }}>Account Dashboard</h3>
       <p style={{ margin: "0 0 16px 0", color: "#e4e4e7" }}>
         Welcome back, <strong style={{ color: "#ff922b" }}>{currentUser.username}</strong> ({currentUser.email || "No Email Associated"})
@@ -499,94 +449,14 @@ export const AccountShell: React.FC<AccountShellProps> = ({
             </div>
           ) : adminTab === "worlds" ? (
             <div>
-              <div style={{ background: "#27272a", padding: "16px", borderRadius: "8px", marginBottom: "16px" }}>
-                <h5 style={{ margin: "0 0 12px 0", color: "#ff922b", fontSize: "15px" }}>Schedule & Create New Game World</h5>
-                <form onSubmit={handleAdminCreateWorld} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>World Name *</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. World Epsilon"
-                      value={newWorldName}
-                      onChange={(e) => setNewWorldName(e.target.value)}
-                      required
-                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Scheduled Start Date/Time</label>
-                    <input
-                      type="datetime-local"
-                      value={newWorldStartsAt}
-                      onChange={(e) => setNewWorldStartsAt(e.target.value)}
-                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Max Player Capacity</label>
-                    <input
-                      type="number"
-                      value={newWorldMaxPlayers}
-                      onChange={(e) => setNewWorldMaxPlayers(parseInt(e.target.value) || 100)}
-                      min={1}
-                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Auto-Close Timer (Days)</label>
-                    <input
-                      type="number"
-                      value={newWorldAutoCloseDays}
-                      onChange={(e) => setNewWorldAutoCloseDays(parseInt(e.target.value) || 20)}
-                      min={1}
-                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", marginBottom: "4px" }}>Initial Stage Status</label>
-                    <select
-                      value={newWorldStatus}
-                      onChange={(e) => setNewWorldStatus(e.target.value as any)}
-                      style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", background: "#18181b", color: "#fff", boxSizing: "border-box" }}
-                    >
-                      <option value="planned_open">Planned - Open Reservation</option>
-                      <option value="planned_closed">Planned - Closed Reservation</option>
-                      <option value="active">Active (Playable)</option>
-                      <option value="active_closed">Active - Closed to New Joiners</option>
-                      <option value="suspended">Suspended (Frozen)</option>
-                      <option value="archived">Archived (Closed)</option>
-                    </select>
-                  </div>
-                  <div style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <input
-                      type="checkbox"
-                      id="isTestOnly"
-                      checked={newWorldIsTestOnly}
-                      onChange={(e) => setNewWorldIsTestOnly(e.target.checked)}
-                    />
-                    <label htmlFor="isTestOnly" style={{ fontSize: "13px", color: "#93c5fd" }}>
-                      <strong>Test-Only World</strong> (Accessible only by tester users, admins, and super admins)
-                    </label>
-                  </div>
-                  <div style={{ gridColumn: "span 2", marginTop: "8px" }}>
-                    <button type="submit" style={{ padding: "8px 16px", background: "#ff922b", color: "#000", fontWeight: "bold", border: "none", borderRadius: "4px", cursor: "pointer" }}>
-                      Schedule & Create World
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* Developer Console State Reference Card */}
-              <div style={{ background: "#18181b", padding: "12px", borderRadius: "6px", border: "1px solid #3f3f46", marginBottom: "16px", fontSize: "12px", color: "#a1a1aa" }}>
-                <strong style={{ color: "#ff922b" }}>[Admin Developer Console] World Stage Lifecycle Reference:</strong>
-                <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
-                  <li><strong>planned_open:</strong> World scheduled in future. Players can reserve right to play.</li>
-                  <li><strong>planned_closed:</strong> World scheduled in future, but new player reservations are locked.</li>
-                  <li><strong>active:</strong> World currently live and open for gameplay and registration.</li>
-                  <li><strong>active_closed:</strong> World actively running, but no new players can join.</li>
-                  <li><strong>suspended:</strong> World state frozen in time for maintenance/admin review.</li>
-                  <li><strong>archived:</strong> World permanently closed; read-only history.</li>
-                </ul>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h5 style={{ margin: 0, color: "#ff922b", fontSize: "15px" }}>World Stage Lifecycle & Configuration Tool</h5>
+                <button
+                  onClick={() => setIsCreationModalOpen(true)}
+                  style={{ padding: "10px 18px", backgroundColor: "#f97316", color: "#ffffff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                >
+                  + Create World with Hex Map Creator Tool
+                </button>
               </div>
 
               <div style={{ overflowX: "auto" }}>
@@ -624,19 +494,6 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                               <option value="archived">archived</option>
                             </select>
 
-                            {w.status !== "archived" && (
-                              <button
-                                onClick={() => {
-                                  setEditingWorldId(editingWorldId === w.id ? null : w.id);
-                                  setEditStartsAt(w.startsAt ? new Date(w.startsAt).toISOString().slice(0, 16) : "");
-                                  setEditMaxPlayers(w.maxPlayers || 100);
-                                }}
-                                style={{ padding: "4px 8px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}
-                              >
-                                {editingWorldId === w.id ? "Cancel Edit" : "Edit Limit/Schedule"}
-                              </button>
-                            )}
-
                             <button
                               onClick={() => handleAdminDeleteWorld(w)}
                               style={{ padding: "4px 8px", background: "#991b1b", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}
@@ -644,36 +501,6 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                               Delete World
                             </button>
                           </div>
-
-                          {editingWorldId === w.id && (
-                            <div style={{ marginTop: "8px", background: "#18181b", padding: "8px", borderRadius: "4px", border: "1px solid #3f3f46", display: "flex", gap: "8px", alignItems: "center" }}>
-                              <div>
-                                <label style={{ display: "block", fontSize: "11px" }}>Start Time</label>
-                                <input
-                                  type="datetime-local"
-                                  value={editStartsAt}
-                                  onChange={(e) => setEditStartsAt(e.target.value)}
-                                  style={{ padding: "4px", borderRadius: "4px", background: "#27272a", color: "#fff", border: "1px solid #3f3f46", fontSize: "12px" }}
-                                />
-                              </div>
-                              <div>
-                                <label style={{ display: "block", fontSize: "11px" }}>Max Players</label>
-                                <input
-                                  type="number"
-                                  value={editMaxPlayers}
-                                  onChange={(e) => setEditMaxPlayers(parseInt(e.target.value) || 100)}
-                                  min={1}
-                                  style={{ width: "80px", padding: "4px", borderRadius: "4px", background: "#27272a", color: "#fff", border: "1px solid #3f3f46", fontSize: "12px" }}
-                                />
-                              </div>
-                              <button
-                                onClick={() => handleAdminUpdateWorldDetails(w.id)}
-                                style={{ marginTop: "14px", padding: "6px 12px", background: "#166534", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}
-                              >
-                                Save Changes
-                              </button>
-                            </div>
-                          )}
                         </td>
                       </tr>
                     ))}
@@ -813,11 +640,6 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                       Starts At: {new Date(w.startsAt).toLocaleString()} ({userTimeZone})
                     </div>
                   )}
-                  {w.status.startsWith("planned") && (
-                    <div style={{ fontSize: "12px", color: "#a1a1aa" }}>
-                      Reservations: {w.reservedCount || 0} / {w.maxPlayers || 100} players
-                    </div>
-                  )}
                 </div>
 
                 <div style={{ display: "flex", gap: "8px" }}>
@@ -829,21 +651,12 @@ export const AccountShell: React.FC<AccountShellProps> = ({
                       Enter World
                     </button>
                   ) : isReservable ? (
-                    w.isReservedByMe ? (
-                      <button
-                        onClick={() => handleCancelWorldReservation(w.id)}
-                        style={{ padding: "8px 16px", background: "#991b1b", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
-                      >
-                        Cancel Reservation
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleReserveWorldSlot(w.id)}
-                        style={{ padding: "8px 16px", background: "#166534", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
-                      >
-                        Reserve Right to Play
-                      </button>
-                    )
+                    <button
+                      onClick={() => handleReserveWorldSlot(w.id)}
+                      style={{ padding: "8px 16px", background: "#166534", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}
+                    >
+                      Reserve Right to Play
+                    </button>
                   ) : (
                     <span style={{ fontSize: "13px", color: "#a1a1aa", fontStyle: "italic" }}>
                       {w.status === "planned_closed" ? "Reservation Closed" : "World Unavailable"}
