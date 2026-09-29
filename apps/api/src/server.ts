@@ -83,10 +83,20 @@ app.get("/health", async (_req: Request, res: Response) => {
   res.status(dbStatus === "connected" ? 200 : 503).json(response);
 });
 
+// Helper to normalize input strings (NFC Unicode normalization) & calculate real character length (supporting Emojis, Hindi, Korean, Chinese, etc.)
+function cleanInput(val: unknown): string {
+  if (typeof val !== "string") return "";
+  return val.normalize("NFC").trim();
+}
+
+function getCharLength(str: string): number {
+  return Array.from(str).length;
+}
+
 // Auth Check Username Endpoint (Real-time onBlur check)
 app.get("/api/auth/check-username", async (req: Request, res: Response) => {
-  const username = req.query.username as string;
-  if (!username || username.trim().length < 3) {
+  const username = cleanInput(req.query.username);
+  if (!username || getCharLength(username) < 3) {
     return res.status(400).json({
       available: false,
       message: "Username must be at least 3 characters long.",
@@ -96,7 +106,7 @@ app.get("/api/auth/check-username", async (req: Request, res: Response) => {
   try {
     const dbRes = await query(
       "SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1",
-      [username.trim()]
+      [username]
     );
 
     if (dbRes.rows.length > 0) {
@@ -120,7 +130,10 @@ app.get("/api/auth/check-username", async (req: Request, res: Response) => {
 
 // Auth Register Route
 app.post("/api/auth/register", async (req: Request, res: Response) => {
-  const { username, email, passwordHash, termsAccepted } = req.body;
+  const { termsAccepted } = req.body;
+  const username = cleanInput(req.body.username);
+  const email = cleanInput(req.body.email);
+  const passwordHash = cleanInput(req.body.passwordHash);
 
   if (!username || !email || !passwordHash) {
     return res.status(400).json({
@@ -137,15 +150,14 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
     } as ApiErrorResponse);
   }
 
-  const trimmedUsername = username.trim();
-  if (trimmedUsername.length < 3) {
+  if (getCharLength(username) < 3) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
       message: "Username must be at least 3 characters long.",
     } as ApiErrorResponse);
   }
 
-  if (passwordHash.length < 8) {
+  if (getCharLength(passwordHash) < 8) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
       message: "Password must be at least 8 characters long.",
@@ -168,13 +180,13 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
       `SELECT username, email FROM users
        WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)
        FOR UPDATE`,
-      [trimmedUsername, email.trim()]
+      [username, email]
     );
 
     if (existingCheck.rows.length > 0) {
       await client.query("ROLLBACK");
       const existing = existingCheck.rows[0];
-      const field = existing.username.toLowerCase() === trimmedUsername.toLowerCase() ? "username" : "email address";
+      const field = existing.username.toLowerCase() === username.toLowerCase() ? "username" : "email address";
       return res.status(400).json({
         code: ErrorCode.INVALID_INPUT,
         message: `An account with this ${field} already exists.`,
@@ -188,7 +200,7 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
       `INSERT INTO users (username, email, password_hash, terms_accepted_at, status, activation_token)
        VALUES ($1, $2, $3, $4, 'pending_activation', $5)
        RETURNING id, username, email, status, created_at as "createdAt"`,
-      [trimmedUsername, email.trim().toLowerCase(), passwordHash, termsAcceptedAt, activationToken]
+      [username, email.toLowerCase(), passwordHash, termsAcceptedAt, activationToken]
     );
 
     await client.query("COMMIT");
@@ -270,7 +282,9 @@ app.post("/api/auth/activate", async (req: Request, res: Response) => {
 
 // Auth Login Route (Supports username OR email address)
 app.post("/api/auth/login", async (req: Request, res: Response) => {
-  const { login, passwordHash } = req.body;
+  const login = cleanInput(req.body.login);
+  const passwordHash = cleanInput(req.body.passwordHash);
+
   if (!login || !passwordHash) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
@@ -283,7 +297,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
       `SELECT id, username, email, status, role, created_at as "createdAt", password_hash
        FROM users
        WHERE (email IS NOT NULL AND LOWER(email) = LOWER($1)) OR LOWER(username) = LOWER($1)`,
-      [login.trim()]
+      [login]
     );
 
     if (dbRes.rows.length === 0 || dbRes.rows[0].password_hash !== passwordHash) {
@@ -508,11 +522,22 @@ app.post("/api/admin/users", async (req: Request, res: Response) => {
     } as ApiErrorResponse);
   }
 
-  const { username, passwordHash, email, role } = req.body;
+  const username = cleanInput(req.body.username);
+  const passwordHash = cleanInput(req.body.passwordHash);
+  const email = cleanInput(req.body.email);
+  const role = req.body.role;
+
   if (!username || !passwordHash) {
     return res.status(400).json({
       code: ErrorCode.INVALID_INPUT,
       message: "Username and passwordHash are required.",
+    } as ApiErrorResponse);
+  }
+
+  if (getCharLength(username) < 3) {
+    return res.status(400).json({
+      code: ErrorCode.INVALID_INPUT,
+      message: "Username must be at least 3 characters long.",
     } as ApiErrorResponse);
   }
 
@@ -525,14 +550,14 @@ app.post("/api/admin/users", async (req: Request, res: Response) => {
   }
 
   const targetRole = role === "super_admin" ? "super_admin" : role === "admin" ? "admin" : role === "tester" ? "tester" : "user";
-  const userEmail = email && email.trim() ? email.trim().toLowerCase() : null;
+  const userEmail = email ? email.toLowerCase() : null;
 
   try {
     const dbRes = await query<UserDto>(
       `INSERT INTO users (username, email, password_hash, role, status)
        VALUES ($1, $2, $3, $4, 'active')
        RETURNING id, username, email, status, role, created_at as "createdAt"`,
-      [username.trim(), userEmail, passwordHash, targetRole]
+      [username, userEmail, passwordHash, targetRole]
     );
 
     return res.json(dbRes.rows[0]);
