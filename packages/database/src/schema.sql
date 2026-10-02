@@ -150,3 +150,27 @@ CREATE TABLE IF NOT EXISTS world_logs (
   details JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS base_buildings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  base_id UUID NOT NULL REFERENCES player_bases(id) ON DELETE CASCADE,
+  building_type VARCHAR(10) NOT NULL,
+  level INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT unique_base_building UNIQUE (base_id, building_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_base_buildings_base ON base_buildings (base_id);
+
+CREATE TABLE IF NOT EXISTS base_resources (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  base_id UUID NOT NULL REFERENCES player_bases(id) ON DELETE CASCADE,
+  resource_type VARCHAR(50) NOT NULL,
+  amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+  production_rate DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+  capacity DOUBLE PRECISION NOT NULL DEFAULT 1000.0,
+  ref_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT unique_base_resource UNIQUE (base_id, resource_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_base_resources_base ON base_resources (base_id);

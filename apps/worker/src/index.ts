@@ -1,11 +1,121 @@
 import { getClient, purgeUnactivatedAccounts } from "@project-inferno/database";
-import { WorldMapConfig } from "@project-inferno/contracts";
+import { WorldMapConfig, BuildingTypeId, ResourceType, ResourceStorageDto } from "@project-inferno/contracts";
 import {
   calculateResources,
   selectPeriodicNeutralSpawnHex,
   DEFAULT_WORLD_MAP_CONFIG,
   NEUTRAL_RACE_ID,
+  getInitialBaseBuildings,
+  getInitialResourceStorages,
+  calculateBaseResources,
+  CANONICAL_BUILDING_IDS,
+  ALL_RESOURCE_TYPES,
 } from "@project-inferno/game-core";
+
+async function ensureWorkerBaseInitialData(client: any, baseId: string, tintRaceId?: string | null): Promise<void> {
+  const buildCheck = await client.query(
+    `SELECT COUNT(*)::int as count FROM base_buildings WHERE base_id = $1`,
+    [baseId]
+  );
+  if (buildCheck.rows[0].count === 0) {
+    const initialBuildings = getInitialBaseBuildings();
+    for (const bType of CANONICAL_BUILDING_IDS) {
+      await client.query(
+        `INSERT INTO base_buildings (base_id, building_type, level)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (base_id, building_type) DO NOTHING`,
+        [baseId, bType, initialBuildings[bType] || 0]
+      );
+    }
+  }
+
+  const resCheck = await client.query(
+    `SELECT COUNT(*)::int as count FROM base_resources WHERE base_id = $1`,
+    [baseId]
+  );
+  if (resCheck.rows[0].count === 0) {
+    const initialResources = getInitialResourceStorages(0, 100);
+    const nowIso = new Date().toISOString();
+    for (const rType of ALL_RESOURCE_TYPES) {
+      const rStorage = initialResources[rType];
+      await client.query(
+        `INSERT INTO base_resources (base_id, resource_type, amount, production_rate, capacity, ref_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (base_id, resource_type) DO NOTHING`,
+        [baseId, rType, rStorage.amount, rStorage.productionRate, rStorage.capacity, nowIso]
+      );
+    }
+  }
+}
+
+async function updateWorkerVillageResources(client: any, baseId: string, effectiveTime: Date = new Date()): Promise<void> {
+  const baseRes = await client.query(`SELECT tint_race_id FROM player_bases WHERE id = $1`, [baseId]);
+  const tintRaceId = baseRes.rows[0]?.tint_race_id || null;
+
+  await ensureWorkerBaseInitialData(client, baseId, tintRaceId);
+
+  const bRes = await client.query(
+    `SELECT building_type as "buildingType", level FROM base_buildings WHERE base_id = $1`,
+    [baseId]
+  );
+  const buildingsMap = {} as Record<BuildingTypeId, number>;
+  for (const bId of CANONICAL_BUILDING_IDS) {
+    buildingsMap[bId] = 0;
+  }
+  for (const row of bRes.rows) {
+    if (row.buildingType in buildingsMap) {
+      buildingsMap[row.buildingType as BuildingTypeId] = Number(row.level);
+    }
+  }
+
+  const rRes = await client.query(
+    `SELECT resource_type as "resourceType", amount, production_rate as "productionRate", capacity, ref_at as "referenceAt"
+     FROM base_resources WHERE base_id = $1`,
+    [baseId]
+  );
+  const currentStorages: Partial<Record<ResourceType, ResourceStorageDto>> = {};
+  for (const row of rRes.rows) {
+    currentStorages[row.resourceType as ResourceType] = {
+      resourceType: row.resourceType,
+      amount: Number(row.amount),
+      productionRate: Number(row.productionRate),
+      capacity: Number(row.capacity),
+      referenceAt: new Date(row.referenceAt).toISOString(),
+    };
+  }
+
+  const updatedStorages = calculateBaseResources({
+    buildings: buildingsMap,
+    tintRaceId,
+    currentStorages,
+    effectiveTime,
+  });
+
+  const effIso = effectiveTime.toISOString();
+  for (const rType of ALL_RESOURCE_TYPES) {
+    const s = updatedStorages[rType];
+    await client.query(
+      `INSERT INTO base_resources (base_id, resource_type, amount, production_rate, capacity, ref_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (base_id, resource_type) DO UPDATE SET
+         amount = EXCLUDED.amount,
+         production_rate = EXCLUDED.production_rate,
+         capacity = EXCLUDED.capacity,
+         ref_at = EXCLUDED.ref_at`,
+      [baseId, rType, s.amount, s.productionRate, s.capacity, effIso]
+    );
+  }
+
+  const matStorage = updatedStorages["BUILDING_MATERIAL"];
+  if (matStorage) {
+    await client.query(
+      `UPDATE player_bases
+       SET resource_amount_at_ref = $1, resource_production_rate = $2, resource_capacity = $3, resource_ref_at = $4
+       WHERE id = $5`,
+      [matStorage.amount, matStorage.productionRate, matStorage.capacity, effIso, baseId]
+    );
+  }
+}
 
 const POLL_INTERVAL_MS = 2000;
 let pollCounter = 0;
@@ -37,30 +147,7 @@ export async function processDueEvents() {
         if (event.event_type === "RESOURCE_UPDATE") {
           const { baseId } = event.payload;
           if (baseId) {
-            const baseRes = await client.query(
-              `SELECT id, resource_amount_at_ref, resource_production_rate, resource_ref_at, resource_capacity
-               FROM player_bases WHERE id = $1 FOR UPDATE`,
-              [baseId]
-            );
-
-            if (baseRes.rows.length > 0) {
-              const base = baseRes.rows[0];
-              const now = new Date();
-              const updatedAmount = calculateResources({
-                amountAtReference: Number(base.resource_amount_at_ref),
-                productionRate: Number(base.resource_production_rate),
-                referenceAt: new Date(base.resource_ref_at),
-                effectiveTime: now,
-                capacity: Number(base.resource_capacity),
-              });
-
-              await client.query(
-                `UPDATE player_bases
-                 SET resource_amount_at_ref = $1, resource_ref_at = $2
-                 WHERE id = $3`,
-                [updatedAmount, now, baseId]
-              );
-            }
+            await updateWorkerVillageResources(client, baseId, new Date());
           }
         } else if (event.event_type === "NEUTRAL_SPAWN_CYCLE") {
           const worldId = event.world_id;
@@ -110,12 +197,16 @@ export async function processDueEvents() {
 
                 const chosenHex = selectPeriodicNeutralSpawnHex(mapConfig, playerBases, occupiedHexes);
                 if (chosenHex) {
-                  await client.query(
+                  const pRes = await client.query(
                     `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, tint_race_id, neutral_origin, points)
                      VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, $4, 'GENERATED_PERIODIC', 100)
-                     ON CONFLICT (world_id, q, r) DO NOTHING`,
+                     ON CONFLICT (world_id, q, r) DO NOTHING
+                     RETURNING id`,
                     [worldId, chosenHex.q, chosenHex.r, NEUTRAL_RACE_ID]
                   );
+                  if (pRes.rows.length > 0) {
+                    await ensureWorkerBaseInitialData(client, pRes.rows[0].id, NEUTRAL_RACE_ID);
+                  }
                   occupiedHexes.add(`${chosenHex.q},${chosenHex.r}`);
                 }
               }
