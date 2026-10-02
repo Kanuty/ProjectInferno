@@ -1,4 +1,234 @@
-import { HexCoordinates, WorldMapConfig, CosmeticFeatureDto, CosmeticTerrainType } from "@project-inferno/contracts";
+import {
+  HexCoordinates,
+  WorldMapConfig,
+  CosmeticFeatureDto,
+  CosmeticTerrainType,
+  RaceDefinition,
+  RaceId,
+  PlayableRaceId,
+  NeutralRaceId,
+} from "@project-inferno/contracts";
+
+export const NEUTRAL_RACE_ID: NeutralRaceId = "WEAREBEARS";
+
+export const SELECTABLE_RACES: PlayableRaceId[] = [
+  "ANGEL",
+  "DEVIL",
+  "VAMPIRE",
+  "NECROMANCER",
+  "OLD_ONE",
+];
+
+export const RACE_DEFINITIONS: Record<RaceId, RaceDefinition> = {
+  HUMAN: {
+    id: "HUMAN",
+    name: "Human Kingdoms",
+    description: "Versatile human kingdom with traditional fortifications and disciplined armies.",
+    icon: "🏰",
+    badgeEmoji: "🛡️",
+    isSelectable: true,
+    ecology: {
+      terrainType: "Temperate Plains",
+      description: "Fertile green plains with temperate fields, wooden palisades, and stone keeps.",
+      primaryColor: "#3b82f6",
+    },
+    buildingNames: {
+      town_hall: "Town Hall",
+      barracks: "Barracks",
+      granary: "Granary & Storehouse",
+      market: "Trade Market",
+      tower: "Watchtower",
+    },
+    unitNames: {
+      u1: "Conscript Levy",
+      u2: "Footman Guard",
+      u3: "Longbowman",
+      u4: "Knight",
+      u5: "Royal Sentinel",
+    },
+  },
+  ANGEL: {
+    id: "ANGEL",
+    name: "Seraphic Host",
+    description: "Radiant divine champions who build sanctuaries atop glowing high grounds.",
+    icon: "👼",
+    badgeEmoji: "✨",
+    isSelectable: true,
+    ecology: {
+      terrainType: "Vibrant Sanctuary",
+      description: "Vibrant green sanctuaries bathed in divine light and golden monuments.",
+      primaryColor: "#eab308",
+    },
+    buildingNames: {
+      town_hall: "Sanctum Cathedral",
+      barracks: "Heavenly Citadel",
+      granary: "Solar Silo",
+      market: "Celestial Exchange",
+      tower: "Luminaria Spire",
+    },
+    unitNames: {
+      u1: "Light Initiate",
+      u2: "Sanctified Warden",
+      u3: "Celestial Marksman",
+      u4: "Solar Paladin",
+      u5: "Archangel Sentinel",
+    },
+  },
+  DEVIL: {
+    id: "DEVIL",
+    name: "Infernal Legion",
+    description: "Fiends of molten volcanic lands forging obsidian iron and hellfire.",
+    icon: "👿",
+    badgeEmoji: "🔥",
+    isSelectable: true,
+    ecology: {
+      terrainType: "Scorched Lava Fields",
+      description: "Scorched obsidian soil, glowing lava cracks, and fiery spires.",
+      primaryColor: "#ef4444",
+    },
+    buildingNames: {
+      town_hall: "Fiend Fortress",
+      barracks: "Obsidian Pit",
+      granary: "Magma Granary",
+      market: "Hellfire Market",
+      tower: "Brimstone Tower",
+    },
+    unitNames: {
+      u1: "Fiend Initiate",
+      u2: "Hellfire Enforcer",
+      u3: "Ash Marksman",
+      u4: "Dread Knight",
+      u5: "Infernal Behemoth",
+    },
+  },
+  VAMPIRE: {
+    id: "VAMPIRE",
+    name: "Blood Court",
+    description: "Aristocratic nocturnal courts of gothic manor estates and blood magic.",
+    icon: "🧛",
+    badgeEmoji: "🩸",
+    isSelectable: true,
+    ecology: {
+      terrainType: "Gothic Night Grass",
+      description: "Dark purple-black nocturnal grass, mist-veiled gothic towers, and blood monuments.",
+      primaryColor: "#a855f7",
+    },
+    buildingNames: {
+      town_hall: "Gothic Manor",
+      barracks: "Blood Citadel",
+      granary: "Blood Vault",
+      market: "Night Exchange",
+      tower: "Bat Spire",
+    },
+    unitNames: {
+      u1: "Night Thrall",
+      u2: "Blood Guard",
+      u3: "Shadow Archer",
+      u4: "Nightrider Knight",
+      u5: "Dread Countess",
+    },
+  },
+  NECROMANCER: {
+    id: "NECROMANCER",
+    name: "Undead Dominion",
+    description: "Masters of the necrotic arts raising bone structures and blighted waste.",
+    icon: "💀",
+    badgeEmoji: "☠️",
+    isSelectable: true,
+    ecology: {
+      terrainType: "Blighted Green Wasteland",
+      description: "Blighted toxic waste, glowing green runes, and ossuary crypts.",
+      primaryColor: "#22c55e",
+    },
+    buildingNames: {
+      town_hall: "Necropolis",
+      barracks: "Spire of the Dead",
+      granary: "Crypt Vault",
+      market: "Shadow Market",
+      tower: "Ossuary Spire",
+    },
+    unitNames: {
+      u1: "Skeleton Levy",
+      u2: "Grave Warden",
+      u3: "Bone Crossbow",
+      u4: "Death Knight",
+      u5: "Dread Lich",
+    },
+  },
+  OLD_ONE: {
+    id: "OLD_ONE",
+    name: "Eldritch Abyss",
+    description: "Ancient mysterious cults summoning void horrors from deep cosmos.",
+    icon: "🐙",
+    badgeEmoji: "👁️",
+    isSelectable: true,
+    ecology: {
+      terrainType: "Void Abyss & Tentacles",
+      description: "Deep violet abyss ground surrounded by writhing eldritch tentacles.",
+      primaryColor: "#6366f1",
+    },
+    buildingNames: {
+      town_hall: "Eldritch Citadel",
+      barracks: "Temple of the Void",
+      granary: "Miasma Vault",
+      market: "Abyssal Exchange",
+      tower: "Void Eye Spire",
+    },
+    unitNames: {
+      u1: "Cultist Initiate",
+      u2: "Abyssal Warden",
+      u3: "Void Whisperer",
+      u4: "Eldritch Terror",
+      u5: "Leviathan Guard",
+    },
+  },
+  WEAREBEARS: {
+    id: "WEAREBEARS",
+    name: "Wearebears Clan",
+    description: "Fierce independent bear tribe inhabiting snowy swamps and wilderness settlements.",
+    icon: "🐻",
+    badgeEmoji: "🐾",
+    isSelectable: false,
+    ecology: {
+      terrainType: "Snowy Swamp & Bear Den",
+      description: "Snowy swampland with rugged bearhide tents, wooden totems, and claw marks.",
+      primaryColor: "#eab308",
+    },
+    buildingNames: {
+      town_hall: "Bear Dens",
+      barracks: "Tribal Training Grounds",
+      granary: "Wilderness Stash",
+      market: "Claw Trading Post",
+      tower: "Greatfang Watch",
+    },
+    unitNames: {
+      u1: "Bearhide Warrior",
+      u2: "Claw Guardian",
+      u3: "Swamp Berserker",
+      u4: "Greatfang Chieftain",
+      u5: "Ursa Elder",
+    },
+  },
+};
+
+export function getRaceDefinition(id?: string | null): RaceDefinition {
+  if (!id || !(id in RACE_DEFINITIONS)) {
+    return RACE_DEFINITIONS.HUMAN;
+  }
+  return RACE_DEFINITIONS[id as RaceId];
+}
+
+export function isValidPlayableRace(id?: string | null): boolean {
+  if (!id) return false;
+  return SELECTABLE_RACES.includes(id as PlayableRaceId);
+}
+
+export function getNeutralRaceId(): NeutralRaceId {
+  return NEUTRAL_RACE_ID;
+}
+
+export * from "./buildings.js";
+export * from "./resources.js";
 
 /**
  * Pure resource calculation logic.

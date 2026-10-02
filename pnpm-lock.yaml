@@ -54,6 +54,9 @@ importers:
       '@project-inferno/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@project-inferno/game-core':
+        specifier: workspace:*
+        version: link:../../packages/game-core
       react:
         specifier: ^18.2.0
         version: 18.3.1

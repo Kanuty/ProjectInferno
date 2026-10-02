@@ -8,7 +8,21 @@ import {
   generateWorldMapPreview,
   selectPlayerSpawnHex,
   selectPeriodicNeutralSpawnHex,
+  getRaceDefinition,
+  isValidPlayableRace,
+  getNeutralRaceId,
+  SELECTABLE_RACES,
+  RACE_DEFINITIONS,
+  NEUTRAL_RACE_ID,
   DEFAULT_WORLD_MAP_CONFIG,
+  getInitialBaseBuildings,
+  checkBuildingPrerequisites,
+  calculateBuildingUpgradeCost,
+  calculateBuildDurationSeconds,
+  getBuildingDisplayName,
+  calculateBaseResources,
+  getInitialResourceStorages,
+  calculateResourceCapacity,
 } from "./index.js";
 
 describe("Game Core Logic", () => {
@@ -120,6 +134,137 @@ describe("Game Core Logic", () => {
       const dist = HexDistanceService.distance(0, 0, periodicHex!.q, periodicHex!.r);
       expect(dist).toBeGreaterThanOrEqual(2);
       expect(dist).toBeLessThanOrEqual(4);
+    });
+  });
+
+  describe("Buildings & Multi-Resource Storage", () => {
+    it("should initialize base with initial buildings B01 Core Seat Lv 1 and B02 Material Producer Lv 1", () => {
+      const buildings = getInitialBaseBuildings();
+      expect(buildings.B01).toBe(1);
+      expect(buildings.B02).toBe(1);
+      expect(buildings.B03).toBe(0);
+      expect(buildings.B09).toBe(0);
+    });
+
+    it("should check building prerequisites correctly", () => {
+      const buildings = getInitialBaseBuildings(); // B01: 1, B02: 1
+
+      // B05 requires B01 Lv 2
+      const prereqB05 = checkBuildingPrerequisites("B05", buildings);
+      expect(prereqB05.isMet).toBe(false);
+      expect(prereqB05.missingPrerequisites).toEqual([{ buildingType: "B01", level: 2 }]);
+
+      // Upgrade B01 to level 2
+      buildings.B01 = 2;
+      const prereqB05Met = checkBuildingPrerequisites("B05", buildings);
+      expect(prereqB05Met.isMet).toBe(true);
+    });
+
+    it("should calculate upgrade cost and duration", () => {
+      const costLv1 = calculateBuildingUpgradeCost("B02", 1, "ANGEL");
+      expect(costLv1["BUILDING_MATERIAL"]).toBe(100);
+
+      const durationLv1 = calculateBuildDurationSeconds(1, 1);
+      expect(durationLv1).toBe(30);
+
+      const durationLv1Seat5 = calculateBuildDurationSeconds(1, 5);
+      expect(durationLv1Seat5).toBeLessThan(30);
+    });
+
+    it("should retrieve race-specific building display names", () => {
+      expect(getBuildingDisplayName("B01", "ANGEL")).toBe("Seat of Judgment");
+      expect(getBuildingDisplayName("B01", "DEVIL")).toBe("Throne of Cinders");
+      expect(getBuildingDisplayName("B01", "HUMAN")).toBe("Town Hall");
+    });
+
+    it("should initialize resource storages with at least 200 Building Material", () => {
+      const storages = getInitialResourceStorages(0, 200);
+      expect(storages["BUILDING_MATERIAL"].amount).toBe(200);
+      expect(storages["SOULS"].amount).toBe(0);
+    });
+
+    it("should calculate multi-resource generation with separate resource capacities", () => {
+      const buildings = {
+        B01: 1,
+        B02: 2, // Material Producer level 2 => 0.2/s
+        B03: 1, // Native-A Producer level 1 => 0.05/s
+        B04: 0,
+        B05: 0,
+        B06: 0,
+        B07: 0,
+        B08: 0,
+        B09: 1, // Vault level 1 => capacity 2500
+        B10: 0,
+        B11: 0,
+        B12: 0,
+        B13: 0,
+        B14: 0,
+      };
+
+      const refTime = new Date("2025-01-01T00:00:00Z");
+      const effTime = new Date("2025-01-01T00:10:00Z"); // 600 seconds later
+
+      const currentStorages = getInitialResourceStorages(1, 200);
+      for (const rType of Object.keys(currentStorages)) {
+        currentStorages[rType as keyof typeof currentStorages]!.referenceAt = refTime.toISOString();
+      }
+
+      const updated = calculateBaseResources({
+        buildings,
+        tintRaceId: "DEVIL", // Native-A: SOULS
+        currentStorages,
+        effectiveTime: effTime,
+      });
+
+      // Material: 200 + 600 * 0.2 = 320
+      expect(updated["BUILDING_MATERIAL"].amount).toBe(320);
+      // Souls: 0 + 600 * 0.05 = 30
+      expect(updated["SOULS"].amount).toBe(30);
+      // Capacity for all resources is separated and equal to 2500
+      expect(updated["BUILDING_MATERIAL"].capacity).toBe(2500);
+      expect(updated["SOULS"].capacity).toBe(2500);
+      expect(updated["LIVESTOCK"].capacity).toBe(2500);
+    });
+  });
+
+  describe("Races System & Validation", () => {
+    it("should define WEAREBEARS as the neutral race ID", () => {
+      expect(getNeutralRaceId()).toBe("WEAREBEARS");
+      expect(NEUTRAL_RACE_ID).toBe("WEAREBEARS");
+    });
+
+    it("should allow playable races and disallow HUMAN, WEAREBEARS or invalid IDs for selection", () => {
+      expect(isValidPlayableRace("ANGEL")).toBe(true);
+      expect(isValidPlayableRace("DEVIL")).toBe(true);
+      expect(isValidPlayableRace("VAMPIRE")).toBe(true);
+      expect(isValidPlayableRace("NECROMANCER")).toBe(true);
+      expect(isValidPlayableRace("OLD_ONE")).toBe(true);
+
+      // HUMAN and WEAREBEARS must NOT be selectable
+      expect(isValidPlayableRace("HUMAN")).toBe(false);
+      expect(SELECTABLE_RACES).not.toContain("HUMAN");
+      expect(isValidPlayableRace("WEAREBEARS")).toBe(false);
+      expect(SELECTABLE_RACES).not.toContain("WEAREBEARS");
+
+      expect(isValidPlayableRace("UNKNOWN")).toBe(false);
+      expect(isValidPlayableRace(null)).toBe(false);
+    });
+
+    it("should retrieve race definitions with presentation profiles, ecology, unit & building names", () => {
+      const humanDef = getRaceDefinition("HUMAN");
+      expect(humanDef.name).toBe("Human Kingdoms");
+      expect(humanDef.buildingNames.town_hall).toBe("Town Hall");
+      expect(humanDef.unitNames.u1).toBe("Conscript Levy");
+
+      const bearDef = getRaceDefinition("WEAREBEARS");
+      expect(bearDef.name).toBe("Wearebears Clan");
+      expect(bearDef.isSelectable).toBe(false);
+      expect(bearDef.buildingNames.town_hall).toBe("Bear Dens");
+      expect(bearDef.unitNames.u1).toBe("Bearhide Warrior");
+
+      // Fallback for null / unknown
+      const fallback = getRaceDefinition("UNKNOWN_RACE");
+      expect(fallback.id).toBe("HUMAN");
     });
   });
 });

@@ -180,6 +180,81 @@ export interface WorldLogDto {
   createdAt: string;
 }
 
+export type BuildingTypeId =
+  | "B01"
+  | "B02"
+  | "B03"
+  | "B04"
+  | "B05"
+  | "B06"
+  | "B07"
+  | "B08"
+  | "B09"
+  | "B10"
+  | "B11"
+  | "B12"
+  | "B13"
+  | "B14";
+
+export type ResourceType =
+  | "BUILDING_MATERIAL"
+  | "SOULS"
+  | "LIVESTOCK"
+  | "REMAINS"
+  | "DIVINE_GRACE"
+  | "HELLFIRE_ESSENCE"
+  | "PRIMAL_FURY"
+  | "BLOOD_ESSENCE"
+  | "GRAVE_DUST"
+  | "VOID_ICHOR";
+
+export type ResourceCostMap = Partial<Record<ResourceType, number>>;
+
+export interface BuildingPrerequisite {
+  buildingType: BuildingTypeId;
+  level: number;
+}
+
+export interface BuildingDefinitionDto {
+  id: BuildingTypeId;
+  canonicalName: string;
+  maxLevel: number;
+  prerequisites: BuildingPrerequisite[];
+  description: string;
+  raceNames: Partial<Record<RaceId, string>>;
+}
+
+export interface BaseBuildingDto {
+  buildingType: BuildingTypeId;
+  level: number;
+  displayName: string;
+  canonicalName: string;
+  maxLevel: number;
+  prerequisites: BuildingPrerequisite[];
+  isUpgradeable: boolean;
+  nextLevelCost?: ResourceCostMap;
+  buildDurationSeconds?: number;
+}
+
+export interface ResourceStorageDto {
+  resourceType: ResourceType;
+  amount: number;
+  productionRate: number;
+  capacity: number;
+  referenceAt: string;
+}
+
+export interface UpgradeBuildingRequest {
+  buildingType: BuildingTypeId;
+}
+
+export interface UpgradeBuildingResponse {
+  message: string;
+  building: BaseBuildingDto;
+  buildings: BaseBuildingDto[];
+  resources: Partial<Record<ResourceType, ResourceStorageDto>>;
+}
+
 export interface BaseDto {
   id: string;
   worldId: string;
@@ -193,6 +268,8 @@ export interface BaseDto {
   tintRaceId?: string | null;
   neutralOrigin?: NeutralOrigin | null;
   points?: number;
+  buildings?: BaseBuildingDto[];
+  resourceStorages?: Partial<Record<ResourceType, ResourceStorageDto>>;
   resources?: {
     amountAtReference: number;
     productionRate: number;
@@ -244,6 +321,29 @@ export interface WorldPreviewResponse {
   candidateStarts: HexCoordinates[];
   terrainFeatures: CosmeticFeatureDto[];
   feasibilityScore: number;
+}
+
+export type PlayableRaceId = "ANGEL" | "DEVIL" | "VAMPIRE" | "NECROMANCER" | "OLD_ONE";
+export type NeutralRaceId = "WEAREBEARS";
+export type CommonRaceId = "HUMAN";
+export type RaceId = PlayableRaceId | NeutralRaceId | CommonRaceId;
+
+export interface RaceEcology {
+  terrainType: string;
+  description: string;
+  primaryColor: string;
+}
+
+export interface RaceDefinition {
+  id: RaceId;
+  name: string;
+  description: string;
+  icon: string;
+  badgeEmoji: string;
+  isSelectable: boolean;
+  ecology: RaceEcology;
+  buildingNames: Record<string, string>;
+  unitNames: Record<string, string>;
 }
 
 export interface JoinWorldRequest {
