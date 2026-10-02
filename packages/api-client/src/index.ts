@@ -22,6 +22,11 @@ import {
   WorldPreviewResponse,
   JoinWorldRequest,
   JoinWorldResponse,
+  BaseBuildingDto,
+  ResourceType,
+  ResourceStorageDto,
+  UpgradeBuildingResponse,
+  BuildingTypeId,
 } from "@project-inferno/contracts";
 
 export interface ApiClientConfig {
@@ -240,5 +245,20 @@ export class ApiClient {
 
   public async getWorldBases(worldId: string): Promise<BaseDto[]> {
     return this.request<BaseDto[]>(`/api/worlds/${worldId}/bases`);
+  }
+
+  // Base Village Buildings & Resources Endpoints
+  public async getBaseBuildings(baseId: string): Promise<BaseBuildingDto[]> {
+    return this.request<BaseBuildingDto[]>(`/api/bases/${baseId}/buildings`);
+  }
+
+  public async getBaseResources(baseId: string): Promise<Record<ResourceType, ResourceStorageDto>> {
+    return this.request<Record<ResourceType, ResourceStorageDto>>(`/api/bases/${baseId}/resources`);
+  }
+
+  public async upgradeBuilding(baseId: string, buildingType: BuildingTypeId): Promise<UpgradeBuildingResponse> {
+    return this.request<UpgradeBuildingResponse>(`/api/bases/${baseId}/buildings/${buildingType}/upgrade`, {
+      method: "POST",
+    });
   }
 }
