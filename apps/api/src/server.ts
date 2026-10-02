@@ -28,6 +28,7 @@ import {
   getInitialBaseBuildings,
   getInitialResourceStorages,
   calculateBaseResources,
+  calculateResources,
   buildBaseBuildingsDtos,
   checkBuildingPrerequisites,
   calculateBuildingUpgradeCost,
@@ -1367,13 +1368,17 @@ app.get("/api/worlds/:worldId/bases", async (req: Request, res: Response) => {
       [worldId]
     );
 
-    const bases: BaseDto[] = [];
-    for (const row of dbRes.rows) {
-      const storages = await updateAndSaveVillageResources(query, row.id);
-      const buildingsMap = await getVillageBuildingsMap(query, row.id);
-      const buildingsDtos = buildBaseBuildingsDtos(buildingsMap, row.tintRaceId);
+    const now = new Date();
+    const bases: BaseDto[] = dbRes.rows.map((row) => {
+      const currentAmount = calculateResources({
+        amountAtReference: Number(row.resourceAmountAtRef || 100),
+        productionRate: Number(row.resourceProductionRate || 1),
+        referenceAt: row.resourceRefAt ? new Date(row.resourceRefAt) : now,
+        effectiveTime: now,
+        capacity: Number(row.resourceCapacity || 10000),
+      });
 
-      bases.push({
+      return {
         id: row.id,
         worldId: row.worldId,
         userId: row.userId,
@@ -1386,17 +1391,15 @@ app.get("/api/worlds/:worldId/bases", async (req: Request, res: Response) => {
         tintRaceId: row.tintRaceId,
         neutralOrigin: row.neutralOrigin,
         points: row.points,
-        buildings: buildingsDtos,
-        resourceStorages: storages,
         resources: {
-          amountAtReference: storages["BUILDING_MATERIAL"].amount,
-          productionRate: storages["BUILDING_MATERIAL"].productionRate,
-          referenceAt: storages["BUILDING_MATERIAL"].referenceAt,
-          capacity: storages["BUILDING_MATERIAL"].capacity,
+          amountAtReference: Math.round(currentAmount * 100) / 100,
+          productionRate: Number(row.resourceProductionRate || 1),
+          referenceAt: now.toISOString(),
+          capacity: Number(row.resourceCapacity || 10000),
         },
         createdAt: row.createdAt,
-      });
-    }
+      };
+    });
 
     return res.json(bases);
   } catch (err: any) {

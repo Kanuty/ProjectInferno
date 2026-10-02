@@ -227,15 +227,16 @@ describe("Game Core Logic", () => {
       expect(NEUTRAL_RACE_ID).toBe("WEAREBEARS");
     });
 
-    it("should allow playable races and disallow WEAREBEARS or invalid IDs for selection", () => {
-      expect(isValidPlayableRace("HUMAN")).toBe(true);
+    it("should allow playable races and disallow HUMAN, WEAREBEARS or invalid IDs for selection", () => {
       expect(isValidPlayableRace("ANGEL")).toBe(true);
       expect(isValidPlayableRace("DEVIL")).toBe(true);
       expect(isValidPlayableRace("VAMPIRE")).toBe(true);
       expect(isValidPlayableRace("NECROMANCER")).toBe(true);
       expect(isValidPlayableRace("OLD_ONE")).toBe(true);
 
-      // WEAREBEARS must NOT be selectable
+      // HUMAN and WEAREBEARS must NOT be selectable
+      expect(isValidPlayableRace("HUMAN")).toBe(false);
+      expect(SELECTABLE_RACES).not.toContain("HUMAN");
       expect(isValidPlayableRace("WEAREBEARS")).toBe(false);
       expect(SELECTABLE_RACES).not.toContain("WEAREBEARS");
 
