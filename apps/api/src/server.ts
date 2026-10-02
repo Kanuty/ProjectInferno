@@ -129,9 +129,17 @@ function getCharLength(str: string): number {
   return Array.from(str).length;
 }
 
+async function execQuery(executor: any, sql: string, params?: any[]) {
+  if (typeof executor === "function") {
+    return await executor(sql, params);
+  }
+  return await executor.query(sql, params);
+}
+
 async function ensureBaseInitialData(dbExecutor: any, baseId: string, tintRaceId?: string | null): Promise<void> {
   // Check if base_buildings initialized
-  const buildCheck = await dbExecutor.query(
+  const buildCheck = await execQuery(
+    dbExecutor,
     `SELECT COUNT(*)::int as count FROM base_buildings WHERE base_id = $1`,
     [baseId]
   );
@@ -139,7 +147,8 @@ async function ensureBaseInitialData(dbExecutor: any, baseId: string, tintRaceId
     const initialBuildings = getInitialBaseBuildings();
     for (const bType of CANONICAL_BUILDING_IDS) {
       const level = initialBuildings[bType] || 0;
-      await dbExecutor.query(
+      await execQuery(
+        dbExecutor,
         `INSERT INTO base_buildings (base_id, building_type, level)
          VALUES ($1, $2, $3)
          ON CONFLICT (base_id, building_type) DO NOTHING`,
@@ -149,16 +158,18 @@ async function ensureBaseInitialData(dbExecutor: any, baseId: string, tintRaceId
   }
 
   // Check if base_resources initialized
-  const resCheck = await dbExecutor.query(
+  const resCheck = await execQuery(
+    dbExecutor,
     `SELECT COUNT(*)::int as count FROM base_resources WHERE base_id = $1`,
     [baseId]
   );
   if (resCheck.rows[0].count === 0) {
-    const initialResources = getInitialResourceStorages(0, 100);
+    const initialResources = getInitialResourceStorages(0, 200);
     const nowIso = new Date().toISOString();
     for (const rType of ALL_RESOURCE_TYPES) {
       const rStorage = initialResources[rType];
-      await dbExecutor.query(
+      await execQuery(
+        dbExecutor,
         `INSERT INTO base_resources (base_id, resource_type, amount, production_rate, capacity, ref_at)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (base_id, resource_type) DO NOTHING`,
@@ -169,7 +180,8 @@ async function ensureBaseInitialData(dbExecutor: any, baseId: string, tintRaceId
 }
 
 async function getVillageBuildingsMap(dbExecutor: any, baseId: string): Promise<Record<BuildingTypeId, number>> {
-  const dbRes = await dbExecutor.query(
+  const dbRes = await execQuery(
+    dbExecutor,
     `SELECT building_type as "buildingType", level FROM base_buildings WHERE base_id = $1`,
     [baseId]
   );
@@ -189,7 +201,8 @@ async function getVillageBuildingsMap(dbExecutor: any, baseId: string): Promise<
 }
 
 async function getVillageResourcesMap(dbExecutor: any, baseId: string): Promise<Partial<Record<ResourceType, ResourceStorageDto>>> {
-  const dbRes = await dbExecutor.query(
+  const dbRes = await execQuery(
+    dbExecutor,
     `SELECT resource_type as "resourceType", amount, production_rate as "productionRate",
             capacity, ref_at as "referenceAt"
      FROM base_resources WHERE base_id = $1`,
@@ -215,7 +228,7 @@ async function updateAndSaveVillageResources(
   baseId: string,
   effectiveTime: Date = new Date()
 ): Promise<Record<ResourceType, ResourceStorageDto>> {
-  const baseRes = await dbExecutor.query(`SELECT tint_race_id FROM player_bases WHERE id = $1`, [baseId]);
+  const baseRes = await execQuery(dbExecutor, `SELECT tint_race_id FROM player_bases WHERE id = $1`, [baseId]);
   const tintRaceId = baseRes.rows[0]?.tint_race_id || null;
 
   await ensureBaseInitialData(dbExecutor, baseId, tintRaceId);
@@ -233,7 +246,8 @@ async function updateAndSaveVillageResources(
   const effIso = effectiveTime.toISOString();
   for (const rType of ALL_RESOURCE_TYPES) {
     const s = updatedStorages[rType];
-    await dbExecutor.query(
+    await execQuery(
+      dbExecutor,
       `INSERT INTO base_resources (base_id, resource_type, amount, production_rate, capacity, ref_at)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (base_id, resource_type) DO UPDATE SET
@@ -248,7 +262,8 @@ async function updateAndSaveVillageResources(
   // Sync legacy columns in player_bases
   const matStorage = updatedStorages["BUILDING_MATERIAL"];
   if (matStorage) {
-    await dbExecutor.query(
+    await execQuery(
+      dbExecutor,
       `UPDATE player_bases
        SET resource_amount_at_ref = $1, resource_production_rate = $2, resource_capacity = $3, resource_ref_at = $4
        WHERE id = $5`,

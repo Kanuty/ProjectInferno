@@ -34,7 +34,7 @@ async function ensureWorkerBaseInitialData(client: any, baseId: string, tintRace
     [baseId]
   );
   if (resCheck.rows[0].count === 0) {
-    const initialResources = getInitialResourceStorages(0, 100);
+    const initialResources = getInitialResourceStorages(0, 200);
     const nowIso = new Date().toISOString();
     for (const rType of ALL_RESOURCE_TYPES) {
       const rStorage = initialResources[rType];

@@ -76,7 +76,7 @@ export function calculateBaseProductionRates(
  */
 export function getInitialResourceStorages(
   vaultLevel: number = 0,
-  initialMaterial: number = 100
+  initialMaterial: number = 200
 ): Record<ResourceType, ResourceStorageDto> {
   const capacity = calculateResourceCapacity(vaultLevel);
   const nowStr = new Date().toISOString();
@@ -126,7 +126,7 @@ export function calculateBaseResources(
       amount = existing.amount;
       refDate = new Date(existing.referenceAt);
     } else if (rType === "BUILDING_MATERIAL") {
-      amount = 100;
+      amount = 200;
     }
 
     const elapsedSeconds = Math.max(0, (effectiveTime.getTime() - refDate.getTime()) / 1000);
