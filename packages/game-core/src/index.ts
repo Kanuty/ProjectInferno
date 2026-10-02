@@ -12,7 +12,6 @@ import {
 export const NEUTRAL_RACE_ID: NeutralRaceId = "WEAREBEARS";
 
 export const SELECTABLE_RACES: PlayableRaceId[] = [
-  "HUMAN",
   "ANGEL",
   "DEVIL",
   "VAMPIRE",

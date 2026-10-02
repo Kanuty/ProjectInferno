@@ -323,9 +323,10 @@ export interface WorldPreviewResponse {
   feasibilityScore: number;
 }
 
-export type PlayableRaceId = "HUMAN" | "ANGEL" | "DEVIL" | "VAMPIRE" | "NECROMANCER" | "OLD_ONE";
+export type PlayableRaceId = "ANGEL" | "DEVIL" | "VAMPIRE" | "NECROMANCER" | "OLD_ONE";
 export type NeutralRaceId = "WEAREBEARS";
-export type RaceId = PlayableRaceId | NeutralRaceId;
+export type CommonRaceId = "HUMAN";
+export type RaceId = PlayableRaceId | NeutralRaceId | CommonRaceId;
 
 export interface RaceEcology {
   terrainType: string;
