@@ -228,6 +228,9 @@ export function getNeutralRaceId(): NeutralRaceId {
   return NEUTRAL_RACE_ID;
 }
 
+export * from "./buildings.js";
+export * from "./resources.js";
+
 /**
  * Pure resource calculation logic.
  */

@@ -25,7 +25,23 @@ import {
   generateCosmeticTerrainFeatures,
   isValidPlayableRace,
   NEUTRAL_RACE_ID,
+  getInitialBaseBuildings,
+  getInitialResourceStorages,
+  calculateBaseResources,
+  buildBaseBuildingsDtos,
+  checkBuildingPrerequisites,
+  calculateBuildingUpgradeCost,
+  BUILDING_DEFINITIONS,
+  CANONICAL_BUILDING_IDS,
+  ALL_RESOURCE_TYPES,
 } from "@project-inferno/game-core";
+import {
+  BuildingTypeId,
+  ResourceType,
+  ResourceStorageDto,
+  BaseBuildingDto,
+  UpgradeBuildingResponse,
+} from "@project-inferno/contracts";
 
 const memoryEmailLogs: EmailLogDto[] = [];
 const memoryWorldLogs: WorldLogDto[] = [];
@@ -110,6 +126,136 @@ function cleanInput(val: unknown): string {
 
 function getCharLength(str: string): number {
   return Array.from(str).length;
+}
+
+async function ensureBaseInitialData(dbExecutor: any, baseId: string, tintRaceId?: string | null): Promise<void> {
+  // Check if base_buildings initialized
+  const buildCheck = await dbExecutor.query(
+    `SELECT COUNT(*)::int as count FROM base_buildings WHERE base_id = $1`,
+    [baseId]
+  );
+  if (buildCheck.rows[0].count === 0) {
+    const initialBuildings = getInitialBaseBuildings();
+    for (const bType of CANONICAL_BUILDING_IDS) {
+      const level = initialBuildings[bType] || 0;
+      await dbExecutor.query(
+        `INSERT INTO base_buildings (base_id, building_type, level)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (base_id, building_type) DO NOTHING`,
+        [baseId, bType, level]
+      );
+    }
+  }
+
+  // Check if base_resources initialized
+  const resCheck = await dbExecutor.query(
+    `SELECT COUNT(*)::int as count FROM base_resources WHERE base_id = $1`,
+    [baseId]
+  );
+  if (resCheck.rows[0].count === 0) {
+    const initialResources = getInitialResourceStorages(0, 100);
+    const nowIso = new Date().toISOString();
+    for (const rType of ALL_RESOURCE_TYPES) {
+      const rStorage = initialResources[rType];
+      await dbExecutor.query(
+        `INSERT INTO base_resources (base_id, resource_type, amount, production_rate, capacity, ref_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (base_id, resource_type) DO NOTHING`,
+        [baseId, rType, rStorage.amount, rStorage.productionRate, rStorage.capacity, nowIso]
+      );
+    }
+  }
+}
+
+async function getVillageBuildingsMap(dbExecutor: any, baseId: string): Promise<Record<BuildingTypeId, number>> {
+  const dbRes = await dbExecutor.query(
+    `SELECT building_type as "buildingType", level FROM base_buildings WHERE base_id = $1`,
+    [baseId]
+  );
+
+  const map = {} as Record<BuildingTypeId, number>;
+  for (const bId of CANONICAL_BUILDING_IDS) {
+    map[bId] = 0;
+  }
+
+  for (const row of dbRes.rows) {
+    if (row.buildingType in map) {
+      map[row.buildingType as BuildingTypeId] = Number(row.level);
+    }
+  }
+
+  return map;
+}
+
+async function getVillageResourcesMap(dbExecutor: any, baseId: string): Promise<Partial<Record<ResourceType, ResourceStorageDto>>> {
+  const dbRes = await dbExecutor.query(
+    `SELECT resource_type as "resourceType", amount, production_rate as "productionRate",
+            capacity, ref_at as "referenceAt"
+     FROM base_resources WHERE base_id = $1`,
+    [baseId]
+  );
+
+  const map: Partial<Record<ResourceType, ResourceStorageDto>> = {};
+  for (const row of dbRes.rows) {
+    map[row.resourceType as ResourceType] = {
+      resourceType: row.resourceType,
+      amount: Number(row.amount),
+      productionRate: Number(row.productionRate),
+      capacity: Number(row.capacity),
+      referenceAt: new Date(row.referenceAt).toISOString(),
+    };
+  }
+
+  return map;
+}
+
+async function updateAndSaveVillageResources(
+  dbExecutor: any,
+  baseId: string,
+  effectiveTime: Date = new Date()
+): Promise<Record<ResourceType, ResourceStorageDto>> {
+  const baseRes = await dbExecutor.query(`SELECT tint_race_id FROM player_bases WHERE id = $1`, [baseId]);
+  const tintRaceId = baseRes.rows[0]?.tint_race_id || null;
+
+  await ensureBaseInitialData(dbExecutor, baseId, tintRaceId);
+
+  const buildings = await getVillageBuildingsMap(dbExecutor, baseId);
+  const currentStorages = await getVillageResourcesMap(dbExecutor, baseId);
+
+  const updatedStorages = calculateBaseResources({
+    buildings,
+    tintRaceId,
+    currentStorages,
+    effectiveTime,
+  });
+
+  const effIso = effectiveTime.toISOString();
+  for (const rType of ALL_RESOURCE_TYPES) {
+    const s = updatedStorages[rType];
+    await dbExecutor.query(
+      `INSERT INTO base_resources (base_id, resource_type, amount, production_rate, capacity, ref_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (base_id, resource_type) DO UPDATE SET
+         amount = EXCLUDED.amount,
+         production_rate = EXCLUDED.production_rate,
+         capacity = EXCLUDED.capacity,
+         ref_at = EXCLUDED.ref_at`,
+      [baseId, rType, s.amount, s.productionRate, s.capacity, effIso]
+    );
+  }
+
+  // Sync legacy columns in player_bases
+  const matStorage = updatedStorages["BUILDING_MATERIAL"];
+  if (matStorage) {
+    await dbExecutor.query(
+      `UPDATE player_bases
+       SET resource_amount_at_ref = $1, resource_production_rate = $2, resource_capacity = $3, resource_ref_at = $4
+       WHERE id = $5`,
+      [matStorage.amount, matStorage.productionRate, matStorage.capacity, effIso, baseId]
+    );
+  }
+
+  return updatedStorages;
 }
 
 async function getAuthUser(req: Request): Promise<UserDto | null> {
@@ -576,12 +722,16 @@ app.post("/api/admin/worlds", async (req: Request, res: Response) => {
     // Seed background initial neutrals
     const preview = generateWorldMapPreview(mapConfig);
     for (const hex of preview.initialNeutrals) {
-      await client.query(
+      const nRes = await client.query(
         `INSERT INTO player_bases (world_id, user_id, name, q, r, position_x, position_y, tint_race_id, neutral_origin, points)
          VALUES ($1, NULL, 'Abandoned Village', $2, $3, $2, $3, $4, 'GENERATED_INITIAL', 100)
-         ON CONFLICT (world_id, q, r) DO NOTHING`,
+         ON CONFLICT (world_id, q, r) DO NOTHING
+         RETURNING id`,
         [createdWorld.id, hex.q, hex.r, NEUTRAL_RACE_ID]
       );
+      if (nRes.rows.length > 0) {
+        await ensureBaseInitialData(client, nRes.rows[0].id, NEUTRAL_RACE_ID);
+      }
     }
 
     // Schedule first NEUTRAL_SPAWN_CYCLE game event if periodic spawning enabled
@@ -806,16 +956,24 @@ app.post("/api/worlds/:worldId/join", async (req: Request, res: Response) => {
       [worldId, authUser.id, playerBaseName, spawnSelection.playerHex.q, spawnSelection.playerHex.r, tintRaceId || null]
     );
 
+    const pBaseRecord = playerBaseRes.rows[0];
+    await ensureBaseInitialData(client, pBaseRecord.id, tintRaceId);
+    const pBaseStorages = await updateAndSaveVillageResources(client, pBaseRecord.id);
+    const pBaseBuildingsMap = await getVillageBuildingsMap(client, pBaseRecord.id);
+    const pBaseBuildings = buildBaseBuildingsDtos(pBaseBuildingsMap, tintRaceId);
+
     const playerBase: BaseDto = {
-      ...playerBaseRes.rows[0],
-      positionX: playerBaseRes.rows[0].positionX ?? spawnSelection.playerHex.q,
-      positionY: playerBaseRes.rows[0].positionY ?? spawnSelection.playerHex.r,
+      ...pBaseRecord,
+      positionX: pBaseRecord.positionX ?? spawnSelection.playerHex.q,
+      positionY: pBaseRecord.positionY ?? spawnSelection.playerHex.r,
       ownerUsername: authUser.username,
+      buildings: pBaseBuildings,
+      resourceStorages: pBaseStorages,
       resources: {
-        amountAtReference: 100,
-        productionRate: 1,
-        referenceAt: new Date().toISOString(),
-        capacity: 10000,
+        amountAtReference: pBaseStorages["BUILDING_MATERIAL"].amount,
+        productionRate: pBaseStorages["BUILDING_MATERIAL"].productionRate,
+        referenceAt: pBaseStorages["BUILDING_MATERIAL"].referenceAt,
+        capacity: pBaseStorages["BUILDING_MATERIAL"].capacity,
       },
     };
 
@@ -833,16 +991,24 @@ app.post("/api/worlds/:worldId/join", async (req: Request, res: Response) => {
       );
 
       if (neutralRes.rows.length > 0) {
+        const nRecord = neutralRes.rows[0];
+        await ensureBaseInitialData(client, nRecord.id, NEUTRAL_RACE_ID);
+        const nStorages = await updateAndSaveVillageResources(client, nRecord.id);
+        const nBuildingsMap = await getVillageBuildingsMap(client, nRecord.id);
+        const nBuildings = buildBaseBuildingsDtos(nBuildingsMap, NEUTRAL_RACE_ID);
+
         guaranteedNeutrals.push({
-          ...neutralRes.rows[0],
-          positionX: neutralRes.rows[0].positionX ?? nHex.q,
-          positionY: neutralRes.rows[0].positionY ?? nHex.r,
+          ...nRecord,
+          positionX: nRecord.positionX ?? nHex.q,
+          positionY: nRecord.positionY ?? nHex.r,
           ownerUsername: null,
+          buildings: nBuildings,
+          resourceStorages: nStorages,
           resources: {
-            amountAtReference: 100,
-            productionRate: 1,
-            referenceAt: new Date().toISOString(),
-            capacity: 10000,
+            amountAtReference: nStorages["BUILDING_MATERIAL"].amount,
+            productionRate: nStorages["BUILDING_MATERIAL"].productionRate,
+            referenceAt: nStorages["BUILDING_MATERIAL"].referenceAt,
+            capacity: nStorages["BUILDING_MATERIAL"].capacity,
           },
         });
       }
@@ -1030,6 +1196,159 @@ app.get("/api/worlds", async (req: Request, res: Response) => {
   }
 });
 
+// Base Village Buildings & Resources Endpoints
+app.get("/api/bases/:baseId/buildings", async (req: Request, res: Response) => {
+  const { baseId } = req.params;
+  try {
+    const baseRes = await query("SELECT id, tint_race_id as \"tintRaceId\" FROM player_bases WHERE id = $1", [baseId]);
+    if (baseRes.rows.length === 0) {
+      return res.status(404).json({ code: ErrorCode.NOT_FOUND, message: "Base not found." } as ApiErrorResponse);
+    }
+    const tintRaceId = baseRes.rows[0].tintRaceId;
+    await updateAndSaveVillageResources(query, baseId);
+    const buildingsMap = await getVillageBuildingsMap(query, baseId);
+    const dtos = buildBaseBuildingsDtos(buildingsMap, tintRaceId);
+    return res.json(dtos);
+  } catch (err: any) {
+    return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
+  }
+});
+
+app.get("/api/bases/:baseId/resources", async (req: Request, res: Response) => {
+  const { baseId } = req.params;
+  try {
+    const baseRes = await query("SELECT id FROM player_bases WHERE id = $1", [baseId]);
+    if (baseRes.rows.length === 0) {
+      return res.status(404).json({ code: ErrorCode.NOT_FOUND, message: "Base not found." } as ApiErrorResponse);
+    }
+    const storages = await updateAndSaveVillageResources(query, baseId);
+    return res.json(storages);
+  } catch (err: any) {
+    return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
+  }
+});
+
+app.post("/api/bases/:baseId/buildings/:buildingType/upgrade", async (req: Request, res: Response) => {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
+    return res.status(401).json({ code: ErrorCode.UNAUTHORIZED, message: "Login required." } as ApiErrorResponse);
+  }
+
+  const { baseId, buildingType } = req.params;
+  const targetBType = buildingType as BuildingTypeId;
+
+  if (!CANONICAL_BUILDING_IDS.includes(targetBType)) {
+    return res.status(400).json({ code: ErrorCode.INVALID_INPUT, message: `Invalid building type '${buildingType}'.` } as ApiErrorResponse);
+  }
+
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+
+    const baseRes = await client.query(
+      `SELECT id, user_id as "userId", tint_race_id as "tintRaceId" FROM player_bases WHERE id = $1 FOR UPDATE`,
+      [baseId]
+    );
+
+    if (baseRes.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ code: ErrorCode.NOT_FOUND, message: "Base not found." } as ApiErrorResponse);
+    }
+
+    const baseRecord = baseRes.rows[0];
+    if (baseRecord.userId && baseRecord.userId !== authUser.id && authUser.role !== "admin" && authUser.role !== "super_admin") {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ code: ErrorCode.FORBIDDEN, message: "You do not own this base." } as ApiErrorResponse);
+    }
+
+    const tintRaceId = baseRecord.tintRaceId;
+    const now = new Date();
+
+    // 1. Calculate & update resources up to now
+    const currentStorages = await updateAndSaveVillageResources(client, baseId, now);
+
+    // 2. Fetch buildings map
+    const buildingsMap = await getVillageBuildingsMap(client, baseId);
+    const currentLevel = buildingsMap[targetBType] || 0;
+    const def = BUILDING_DEFINITIONS[targetBType];
+
+    if (currentLevel >= def.maxLevel) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        code: ErrorCode.ACTION_NOT_ALLOWED,
+        message: `Building '${def.canonicalName}' has already reached maximum level (${def.maxLevel}).`,
+      } as ApiErrorResponse);
+    }
+
+    // 3. Check prerequisites
+    const { isMet, missingPrerequisites } = checkBuildingPrerequisites(targetBType, buildingsMap);
+    if (!isMet) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        code: ErrorCode.ACTION_NOT_ALLOWED,
+        message: `Prerequisites not met for upgrading '${def.canonicalName}'.`,
+        details: { missingPrerequisites },
+      } as ApiErrorResponse);
+    }
+
+    // 4. Check upgrade cost
+    const targetLevel = currentLevel + 1;
+    const upgradeCost = calculateBuildingUpgradeCost(targetBType, targetLevel, tintRaceId);
+
+    for (const rTypeStr of Object.keys(upgradeCost)) {
+      const rType = rTypeStr as ResourceType;
+      const requiredAmount = upgradeCost[rType] || 0;
+      const availableAmount = currentStorages[rType]?.amount || 0;
+      if (availableAmount < requiredAmount) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          code: ErrorCode.INSUFFICIENT_QUANTITY,
+          message: `Insufficient ${rType} (Required: ${requiredAmount}, Available: ${Math.floor(availableAmount)}).`,
+        } as ApiErrorResponse);
+      }
+    }
+
+    // 5. Deduct cost & update level in base_buildings
+    for (const rTypeStr of Object.keys(upgradeCost)) {
+      const rType = rTypeStr as ResourceType;
+      const requiredAmount = upgradeCost[rType] || 0;
+      currentStorages[rType].amount = Math.max(0, currentStorages[rType].amount - requiredAmount);
+      await client.query(
+        `UPDATE base_resources SET amount = $1, ref_at = $2 WHERE base_id = $3 AND resource_type = $4`,
+        [currentStorages[rType].amount, now.toISOString(), baseId, rType]
+      );
+    }
+
+    const newLevel = currentLevel + 1;
+    await client.query(
+      `INSERT INTO base_buildings (base_id, building_type, level, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (base_id, building_type) DO UPDATE SET level = EXCLUDED.level, updated_at = NOW()`,
+      [baseId, targetBType, newLevel]
+    );
+
+    // 6. Recalculate production rates, capacities & save
+    const updatedStorages = await updateAndSaveVillageResources(client, baseId, now);
+    const updatedBuildingsMap = await getVillageBuildingsMap(client, baseId);
+    const updatedBuildingsDtos = buildBaseBuildingsDtos(updatedBuildingsMap, tintRaceId);
+    const updatedBuildingDto = updatedBuildingsDtos.find((b) => b.buildingType === targetBType)!;
+
+    await client.query("COMMIT");
+
+    return res.json({
+      message: `Successfully upgraded ${updatedBuildingDto.displayName} to Level ${newLevel}!`,
+      building: updatedBuildingDto,
+      buildings: updatedBuildingsDtos,
+      resources: updatedStorages,
+    } as UpgradeBuildingResponse);
+  } catch (err: any) {
+    await client.query("ROLLBACK");
+    return res.status(500).json({ code: ErrorCode.INTERNAL_ERROR, message: err.message } as ApiErrorResponse);
+  } finally {
+    client.release();
+  }
+});
+
 // Player Bases Legacy Endpoint
 app.get("/api/worlds/:worldId/bases", async (req: Request, res: Response) => {
   const { worldId } = req.params;
@@ -1048,27 +1367,36 @@ app.get("/api/worlds/:worldId/bases", async (req: Request, res: Response) => {
       [worldId]
     );
 
-    const bases: BaseDto[] = dbRes.rows.map((row) => ({
-      id: row.id,
-      worldId: row.worldId,
-      userId: row.userId,
-      ownerUsername: row.ownerUsername,
-      name: row.name,
-      q: row.q,
-      r: row.r,
-      positionX: row.positionX ?? row.q,
-      positionY: row.positionY ?? row.r,
-      tintRaceId: row.tintRaceId,
-      neutralOrigin: row.neutralOrigin,
-      points: row.points,
-      resources: {
-        amountAtReference: row.resourceAmountAtRef,
-        productionRate: row.resourceProductionRate,
-        referenceAt: row.resourceRefAt,
-        capacity: row.resourceCapacity,
-      },
-      createdAt: row.createdAt,
-    }));
+    const bases: BaseDto[] = [];
+    for (const row of dbRes.rows) {
+      const storages = await updateAndSaveVillageResources(query, row.id);
+      const buildingsMap = await getVillageBuildingsMap(query, row.id);
+      const buildingsDtos = buildBaseBuildingsDtos(buildingsMap, row.tintRaceId);
+
+      bases.push({
+        id: row.id,
+        worldId: row.worldId,
+        userId: row.userId,
+        ownerUsername: row.ownerUsername,
+        name: row.name,
+        q: row.q,
+        r: row.r,
+        positionX: row.positionX ?? row.q,
+        positionY: row.positionY ?? row.r,
+        tintRaceId: row.tintRaceId,
+        neutralOrigin: row.neutralOrigin,
+        points: row.points,
+        buildings: buildingsDtos,
+        resourceStorages: storages,
+        resources: {
+          amountAtReference: storages["BUILDING_MATERIAL"].amount,
+          productionRate: storages["BUILDING_MATERIAL"].productionRate,
+          referenceAt: storages["BUILDING_MATERIAL"].referenceAt,
+          capacity: storages["BUILDING_MATERIAL"].capacity,
+        },
+        createdAt: row.createdAt,
+      });
+    }
 
     return res.json(bases);
   } catch (err: any) {
