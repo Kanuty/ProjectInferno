@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { BaseDto, WorldDto } from "@project-inferno/contracts";
 import { ApiClient } from "@project-inferno/api-client";
-import { getRaceDefinition, SELECTABLE_RACES, RACE_DEFINITIONS } from "@project-inferno/game-core";
+import { SELECTABLE_RACES, RACE_DEFINITIONS } from "@project-inferno/game-core";
 import { HexMapView } from "./HexMapView";
+import { VillageView } from "./VillageView";
 
 interface GameShellProps {
   apiClient: ApiClient;
@@ -79,64 +80,13 @@ export const GameShell: React.FC<GameShellProps> = ({ apiClient, worldId, curren
       {loading ? (
         <p>Loading world map and player bases...</p>
       ) : selectedVillage ? (
-        (() => {
-          const raceDef = getRaceDefinition(selectedVillage.tintRaceId);
-          return (
-            <div style={{ backgroundColor: "#1e293b", padding: "24px", borderRadius: "8px", border: "1px solid #334155" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #475569", paddingBottom: "12px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "2rem" }}>{raceDef.icon}</span>
-                  <div>
-                    <h3 style={{ margin: 0, color: "#f97316" }}>Village Headquarters: {selectedVillage.name}</h3>
-                    <span style={{ fontSize: "0.85rem", color: "#94a3b8" }}>
-                      Race Presentation: <strong style={{ color: raceDef.ecology.primaryColor }}>{raceDef.name}</strong> ({raceDef.badgeEmoji})
-                    </span>
-                  </div>
-                </div>
-                <button onClick={() => setSelectedVillage(null)} style={{ padding: "8px 16px", backgroundColor: "#334155", color: "#f8fafc", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: 600 }}>
-                  ← Return to Hex Map
-                </button>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-                <div>
-                  <h4 style={{ margin: "0 0 8px 0", color: "#38bdf8" }}>General Overview</h4>
-                  <p><strong>Coordinates:</strong> ({selectedVillage.q}, {selectedVillage.r})</p>
-                  <p><strong>Owner:</strong> {selectedVillage.ownerUsername || "Neutral / Abandoned"}</p>
-                  <p><strong>Points:</strong> {selectedVillage.points || 100}</p>
-                  <p><strong>Race / Faction:</strong> <span style={{ color: raceDef.ecology.primaryColor, fontWeight: 700 }}>{raceDef.name}</span></p>
-
-                  <div style={{ marginTop: "16px", padding: "12px", backgroundColor: "#0f172a", borderRadius: "6px", border: "1px solid #334155" }}>
-                    <h5 style={{ margin: "0 0 6px 0", color: raceDef.ecology.primaryColor }}>Ecology & Environment</h5>
-                    <p style={{ margin: "2px 0", fontSize: "0.85rem", color: "#cbd5e1" }}><strong>Terrain:</strong> {raceDef.ecology.terrainType}</p>
-                    <p style={{ margin: "2px 0", fontSize: "0.85rem", color: "#94a3b8" }}>{raceDef.ecology.description}</p>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                  <div style={{ padding: "16px", backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
-                    <h4 style={{ margin: "0 0 8px 0", color: "#38bdf8" }}>Resource Stores</h4>
-                    <p style={{ margin: "4px 0" }}>Production Rate: {selectedVillage.resources?.productionRate || 1}/s</p>
-                    <p style={{ margin: "4px 0" }}>Storage Capacity: {selectedVillage.resources?.capacity || 10000}</p>
-                  </div>
-
-                  <div style={{ padding: "16px", backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
-                    <h4 style={{ margin: "0 0 8px 0", color: "#38bdf8" }}>Base Structures & Unit Roster</h4>
-                    <p style={{ margin: "4px 0", fontSize: "0.85rem" }}>
-                      <strong>Main Building:</strong> {raceDef.buildingNames.town_hall} | <strong>Military:</strong> {raceDef.buildingNames.barracks}
-                    </p>
-                    <p style={{ margin: "4px 0", fontSize: "0.85rem" }}>
-                      <strong>Storage:</strong> {raceDef.buildingNames.granary} | <strong>Trade:</strong> {raceDef.buildingNames.market}
-                    </p>
-                    <p style={{ margin: "8px 0 4px 0", fontSize: "0.85rem", color: "#cbd5e1" }}>
-                      <strong>Trainable Troops:</strong> {Object.values(raceDef.unitNames).join(", ")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })()
+        <VillageView
+          apiClient={apiClient}
+          village={selectedVillage}
+          isOwner={selectedVillage.userId === currentUserId}
+          onBackToMap={() => setSelectedVillage(null)}
+          onVillageUpdated={() => loadWorldAndBases()}
+        />
       ) : myBases.length === 0 ? (
         <div style={{ padding: "24px", backgroundColor: "#1e293b", borderRadius: "8px", border: "1px solid #334155" }}>
           <h3 style={{ marginTop: 0, color: "#f97316", textAlign: "center" }}>Select Your Race & Spawn Initial Base</h3>
