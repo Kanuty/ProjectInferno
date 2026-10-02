@@ -177,6 +177,12 @@ describe("Game Core Logic", () => {
       expect(getBuildingDisplayName("B01", "HUMAN")).toBe("Town Hall");
     });
 
+    it("should initialize resource storages with at least 200 Building Material", () => {
+      const storages = getInitialResourceStorages(0, 200);
+      expect(storages["BUILDING_MATERIAL"].amount).toBe(200);
+      expect(storages["SOULS"].amount).toBe(0);
+    });
+
     it("should calculate multi-resource generation with separate resource capacities", () => {
       const buildings = {
         B01: 1,
@@ -198,7 +204,7 @@ describe("Game Core Logic", () => {
       const refTime = new Date("2025-01-01T00:00:00Z");
       const effTime = new Date("2025-01-01T00:10:00Z"); // 600 seconds later
 
-      const currentStorages = getInitialResourceStorages(1, 100);
+      const currentStorages = getInitialResourceStorages(1, 200);
       for (const rType of Object.keys(currentStorages)) {
         currentStorages[rType as keyof typeof currentStorages]!.referenceAt = refTime.toISOString();
       }
@@ -210,8 +216,8 @@ describe("Game Core Logic", () => {
         effectiveTime: effTime,
       });
 
-      // Material: 100 + 600 * 0.2 = 220
-      expect(updated["BUILDING_MATERIAL"].amount).toBe(220);
+      // Material: 200 + 600 * 0.2 = 320
+      expect(updated["BUILDING_MATERIAL"].amount).toBe(320);
       // Souls: 0 + 600 * 0.05 = 30
       expect(updated["SOULS"].amount).toBe(30);
       // Capacity for all resources is separated and equal to 2500
